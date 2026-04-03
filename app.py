@@ -4,6 +4,7 @@ import base64
 import os
 import pickle
 import io
+from fpdf import FPDF # Ajouter fpdf dans requirements.txt
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Les Orchidées PRO", layout="wide")
@@ -36,19 +37,50 @@ def sauvegarder_donnees():
 if 'db' not in st.session_state:
     st.session_state.db = charger_donnees()
 
+# --- GÉNÉRATION DU PDF STRUCTURÉ ---
+def generer_pdf_situation(tranche_nom, data_tranche):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(190, 10, f"SITUATION DES TRAVAUX - {tranche_nom.upper()}", ln=True, align='C')
+    pdf.ln(10)
+
+    categories = {
+        "MARBRE": "marbre",
+        "ÉLECTRICITÉ": "elec",
+        "PLOMBERIE": "plomb",
+        "CÉRAMIQUE": "ceram"
+    }
+
+    for titre, key in categories.items():
+        if data_tranche[key]:
+            pdf.set_font("Arial", 'B', 14)
+            pdf.set_fill_color(230, 230, 230)
+            pdf.cell(190, 10, titre, ln=True, fill=True)
+            pdf.ln(2)
+            
+            pdf.set_font("Arial", '', 10)
+            # Entêtes selon la catégorie
+            if key == "marbre":
+                for item in data_tranche[key]:
+                    txt = f"Date: {item['Date']} | Intervenant: {item['Nom']} | Type: {item['Type']} | Lieu: {item['Lieu']}"
+                    if item.get('Fournisseur'): txt += f" | Fourn: {item['Fournisseur']}"
+                    pdf.multi_cell(190, 8, txt, border=1)
+            else:
+                for item in data_tranche[key]:
+                    nom_tache = item.get('Produit') or item.get('Type') or "Tâche"
+                    detail = item.get('Lieu') or item.get('Détail') or ""
+                    qte = f" | Qté: {item['Qté']}" if 'Qté' in item else ""
+                    pdf.multi_cell(190, 8, f"Date: {item['Date']} | {nom_tache} | {detail}{qte}", border=1)
+            pdf.ln(5)
+    
+    return pdf.output(dest='S').encode('latin-1')
+
 # --- NAVIGATION ---
 st.sidebar.title("LES ORCHIDÉES")
 mode = st.sidebar.radio("SÉLECTIONNER LE MODE", ["📝 SAISIE", "🔍 CONSULTATION"])
 tranche = st.sidebar.selectbox("CHOISIR LA TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
 data = st.session_state.db[tranche]
-
-# --- FONCTION APERÇU EXCEL ---
-def consulter_excel(file_bytes, file_name):
-    try:
-        df = pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl')
-        st.dataframe(df, use_container_width=True)
-    except:
-        st.error("Impossible d'afficher l'aperçu direct.")
 
 # ==========================================
 #                MODE SAISIE
@@ -97,39 +129,25 @@ if mode == "📝 SAISIE":
         elif spec == "Marbre":
             interv = st.selectbox("Intervenant", ["FETTAH", "Simo"], key="m_inter")
             type_m = st.selectbox("Type de Marbre", ["Gris Bold", "White Sand", "Blanc Carrara"], key="m_type")
-            
             fourn = None
             ref_carrara = None
             if type_m == "Blanc Carrara":
                 fourn = st.selectbox("Fournisseur", ["Graziani", "Caro Colombi", "Lorenzoni"], key="m_fourn")
-                ref_carrara = st.text_input("Référence (Lot/Bloc)", placeholder="Ex: Bloc A-102", key="m_ref")
-            
+                ref_carrara = st.text_input("Référence (Lot/Bloc)", key="m_ref")
             imm = st.text_input("Immeuble", key="m_imm")
-            
             etage = None
             appt = None
             if type_m != "White Sand":
                 etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème"], key="m_etage")
                 if type_m == "Blanc Carrara":
                     appt = st.text_input("Appartement", key="m_appt")
-
             p_m = st.file_uploader("Photo Marbre", type=['jpg','jpeg','png'], key="p_m_up")
-            
             if st.button("Valider Saisie Marbre"):
                 lieu = f"Imm {imm}"
                 if etage: lieu += f" - {etage}"
                 if appt: lieu += f" - Appt {appt}"
                 if type_m == "White Sand": lieu += " (Façade)"
-                
-                data['marbre'].append({
-                    "Nom": interv, 
-                    "Type": type_m, 
-                    "Fournisseur": fourn, 
-                    "Référence": ref_carrara,
-                    "Lieu": lieu, 
-                    "Date": pd.Timestamp.now().strftime("%d/%m"),
-                    "photo": p_m.getvalue() if p_m else None
-                })
+                data['marbre'].append({"Nom": interv, "Type": type_m, "Fournisseur": fourn, "Référence": ref_carrara, "Lieu": lieu, "Date": pd.Timestamp.now().strftime("%d/%m"), "photo": p_m.getvalue() if p_m else None})
                 sauvegarder_donnees()
                 st.success(f"Saisie {type_m} enregistrée !")
 
@@ -139,10 +157,7 @@ if mode == "📝 SAISIE":
             et = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème"])
             p_c = st.file_uploader("Photo Céramique", type=['jpg','jpeg','png'], key="p_c_up")
             if st.button("Valider Céramique"):
-                data['ceram'].append({
-                    "Type": z, "Lieu": f"Imm {im_c} - Etage {et}", 
-                    "Date": pd.Timestamp.now().strftime("%d/%m"), "photo": p_c.getvalue() if p_c else None
-                })
+                data['ceram'].append({"Type": z, "Lieu": f"Imm {im_c} - Etage {et}", "Date": pd.Timestamp.now().strftime("%d/%m"), "photo": p_c.getvalue() if p_c else None})
                 sauvegarder_donnees()
                 st.success("Céramique OK")
 
@@ -158,6 +173,17 @@ if mode == "📝 SAISIE":
 # ==========================================
 else:
     st.header(f"🔍 Consultation - {tranche}")
+    
+    # --- BOUTON GÉNÉRATION RAPPORT PDF ---
+    pdf_content = generer_pdf_situation(tranche, data)
+    st.download_button(
+        label="📥 TÉLÉCHARGER LE RAPPORT DE SITUATION (PDF)",
+        data=pdf_content,
+        file_name=f"Situation_{tranche}.pdf",
+        mime="application/pdf"
+    )
+    st.divider()
+
     c1, c2, c3, c4 = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVI", "👥 SALARIÉ"])
 
     with c1:
@@ -187,7 +213,10 @@ else:
         for s in data['salaries']:
             with st.expander(f"📊 {s['nom']}"):
                 if s['nom'].lower().endswith('.xlsx'):
-                    consulter_excel(s['content'], s['nom'])
+                    try:
+                        df = pd.read_excel(io.BytesIO(s['content']), engine='openpyxl')
+                        st.dataframe(df, use_container_width=True)
+                    except: st.error("Aperçu impossible.")
                 else:
                     b64 = base64.b64encode(s['content']).decode()
                     st.components.v1.html(f'<button onclick="window.open(URL.createObjectURL(new Blob([new Uint8Array(atob(\'{b64}\').split(\'\').map(c=>c.charCodeAt(0)))] , {{type:\'application/pdf\'}})), \'_blank\')" style="width:100%; padding:10px; background:#007bff; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">👁️ VOIR LE PDF</button>', height=50)
