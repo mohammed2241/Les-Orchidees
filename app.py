@@ -33,74 +33,83 @@ def sauvegarder_donnees():
 if 'db' not in st.session_state:
     st.session_state.db = charger_donnees()
 
+# --- FONCTION D'OUVERTURE FORCEE (JS BLOB) ---
+def bouton_ouvrir_onglet(file_bytes, file_name, label="👁️ VOIR LE DOCUMENT"):
+    b64 = base64.b64encode(file_bytes).decode()
+    mime_type = "application/pdf" if file_name.lower().endswith('.pdf') else "image/jpeg"
+    
+    # Script JavaScript pour contourner le blocage "about:blank#blocked"
+    js_code = f"""
+    <script>
+    function openDoc() {{
+        var byteCharacters = atob("{b64}");
+        var byteNumbers = new Array(byteCharacters.length);
+        for (var i = 0; i < byteCharacters.length; i++) {{
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }}
+        var byteArray = new Uint8Array(byteNumbers);
+        var blob = new Blob([byteArray], {{type: "{mime_type}"}});
+        var fileURL = URL.createObjectURL(blob);
+        window.open(fileURL, '_blank');
+    }}
+    </script>
+    <button onclick="openDoc()" style="
+        background-color: #007bff; 
+        color: white; 
+        border: none; 
+        padding: 12px 24px; 
+        border-radius: 8px; 
+        cursor: pointer; 
+        font-weight: bold;
+        width: 100%;
+        display: block;
+    ">
+        {label}
+    </button>
+    """
+    st.components.v1.html(js_code, height=60)
+
 # --- NAVIGATION ---
 mode = st.sidebar.radio("MODE", ["📝 SAISIE", "🔍 CONSULTATION"])
 tranche = st.sidebar.selectbox("TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
 data = st.session_state.db[tranche]
 
-# --- FONCTION DE LECTURE INTÉGRÉE ---
-def lecteur_integre(file_bytes, file_name):
-    ext = file_name.lower().split('.')[-1]
-    
-    if ext in ['jpg', 'jpeg', 'png']:
-        st.image(file_bytes, use_container_width=True)
-    elif ext == 'pdf':
-        # Encodage pour l'affichage intégré
-        base64_pdf = base64.b64encode(file_bytes).decode('utf-8')
-        # Création d'une zone de lecture (Embed)
-        pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf">'
-        st.markdown(pdf_display, unsafe_allow_html=True)
-    else:
-        st.warning(f"Le format .{ext} ne peut pas être lu directement. Utilisez le bouton ci-dessous.")
-    
-    # On laisse quand même le bouton en bas au cas où
-    st.download_button("📥 Télécharger une copie", data=file_bytes, file_name=file_name, key=os.urandom(5).hex())
-
 # ==========================================
-#                MODE SAISIE
+#                MODE SAISIE (Simplifié)
 # ==========================================
 if mode == "📝 SAISIE":
     t1, t2, t3, t4 = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVI", "👥 SALARIÉ"])
-
+    
     with t1:
-        up = st.file_uploader("Upload Plan", type=['pdf', 'jpg', 'png', 'jpeg'])
-        if st.button("✅ Enregistrer Plan"):
-            if up:
-                data['plans'].append({"nom": up.name, "content": up.getvalue()})
-                sauvegarder_donnees()
-                st.success("Plan enregistré !")
-
+        up = st.file_uploader("Upload Plan", type=['pdf', 'jpg', 'png', 'jpeg'], key="u_p")
+        if st.button("✅ Enregistrer Plan") and up:
+            data['plans'].append({"nom": up.name, "content": up.getvalue()})
+            sauvegarder_donnees()
+            st.success("Plan enregistré !")
+            
     with t2:
         f = st.selectbox("Fournisseur", ["Lafarge", "Ingelec", "Roca", "Nexans"])
         d = st.text_input("Désignation")
         if st.button("Valider Marchandise"):
-            data['marchandises'].append({"Fournisseur": f, "Désignation": d, "Date": pd.Timestamp.now().strftime("%d/%m %H:%M")})
+            data['marchandises'].append({"Fournisseur": f, "Désignation": d, "Date": pd.Timestamp.now().strftime("%d/%m")})
             sauvegarder_donnees()
-            st.success("OK !")
+            st.success("OK")
 
     with t3:
         m = st.radio("Métier", ["Marbre", "Céramique"], horizontal=True)
-        if m == "Marbre":
-            p = st.selectbox("Nom", ["FETTAH", "Simo"])
-            l = st.text_input("Immeuble / Appart")
-            if st.button("Enregistrer Marbre"):
-                data['marbre'].append({"Nom": p, "Lieu": l})
-                sauvegarder_donnees()
-                st.success("OK")
-        else:
-            z = st.text_input("Zone")
-            if st.button("Enregistrer Céramique"):
-                data['ceram'].append({"Info": z})
-                sauvegarder_donnees()
-                st.success("OK")
+        l = st.text_input("Détails (Immeuble/Appart)")
+        if st.button("Enregistrer Suivi"):
+            key = "marbre" if m == "Marbre" else "ceram"
+            data[key].append({"Métier": m, "Détails": l})
+            sauvegarder_donnees()
+            st.success("Enregistré")
 
     with t4:
-        up_s = st.file_uploader("Pointage", type=['pdf', 'xlsx'])
-        if st.button("Confirmer Salarié"):
-            if up_s:
-                data['salaries'].append({"nom": up_s.name, "content": up_s.getvalue()})
-                sauvegarder_donnees()
-                st.success("Enregistré !")
+        up_s = st.file_uploader("Pointage", type=['pdf', 'xlsx'], key="u_s")
+        if st.button("Confirmer Salarié") and up_s:
+            data['salaries'].append({"nom": up_s.name, "content": up_s.getvalue()})
+            sauvegarder_donnees()
+            st.success("Pointage enregistré !")
 
 # ==========================================
 #           MODE CONSULTATION
@@ -111,8 +120,9 @@ else:
 
     with c1:
         for p in data['plans']:
-            with st.expander(f"👁️ VOIR : {p['nom']}", expanded=False):
-                lecteur_integre(p['content'], p['nom'])
+            with st.expander(f"📁 {p['nom']}"):
+                bouton_ouvrir_onglet(p['content'], p['nom'], "OUVRIR DANS UN NOUVEL ONGLET")
+                st.download_button("📥 Télécharger si l'onglet ne s'ouvre pas", data=p['content'], file_name=p['nom'], key=os.urandom(4).hex())
 
     with c2:
         if data['marchandises']: st.table(pd.DataFrame(data['marchandises']))
@@ -124,5 +134,6 @@ else:
 
     with c4:
         for s in data['salaries']:
-            with st.expander(f"👁️ VOIR : {s['nom']}", expanded=False):
-                lecteur_integre(s['content'], s['nom'])
+            with st.expander(f"📁 {s['nom']}"):
+                bouton_ouvrir_onglet(s['content'], s['nom'], "CONSULTER LE POINTAGE")
+                st.download_button("📥 Télécharger", data=s['content'], file_name=s['nom'], key=os.urandom(4).hex())
