@@ -181,13 +181,15 @@ elif mode == "📝 SAISIE":
             fourn, ref_v, appt, surf, fini = None, None, None, 0.0, "Poli"
             if type_m == "Blanc Carrara":
                 c1, c2 = st.columns(2)
-                fourn = c1.selectbox("Fournisseur Marbre", ["Graziani", "Caro Colombi", "Lorenzoni"])
+                # Ajout de MARMI BIANCO ici
+                fourn = c1.selectbox("Fournisseur Marbre", ["Graziani", "Caro Colombi", "Lorenzoni", "MARMI BIANCO"])
                 ref_v = c2.text_input("Référence (Lot/Bloc)")
                 appt = st.text_input("N° Appartement")
                 surf = st.number_input("Surface (m²)", min_value=0.0)
                 fini = st.selectbox("Finition", ["Poli", "Adouci", "Brut"])
             imm = st.text_input("Immeuble")
-            etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème"])
+            # Ajout du 5ème étage ici
+            etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème", "5ème"])
             p_m = st.file_uploader("Photo de la pose")
             if st.button("Enregistrer Marbre"):
                 lieu = f"Imm {imm} - {etage}"
@@ -196,7 +198,11 @@ elif mode == "📝 SAISIE":
                 sauvegarder_donnees(); st.success("Saisie Marbre OK")
         
         elif spec == "Céramique":
-            z = st.selectbox("Zone", ["SDB", "Chambre", "Terrasse"]); im = st.text_input("Immeuble"); et = st.selectbox("Etage", ["RDC","1","2","3","4"]); p_c = st.file_uploader("Photo Céramique")
+            z = st.selectbox("Zone", ["SDB", "Chambre", "Terrasse"])
+            im = st.text_input("Immeuble")
+            # Ajout du 5ème étage ici
+            et = st.selectbox("Etage", ["RDC","1","2","3","4","5"])
+            p_c = st.file_uploader("Photo Céramique")
             if st.button("Enregistrer Céramique"):
                 data['ceram'].append({"Type":z, "Lieu":f"Imm {im} - {et}", "Date":pd.Timestamp.now().strftime("%d/%m"), "photo":p_c.getvalue() if p_c else None})
                 sauvegarder_donnees(); st.success("Céramique OK")
@@ -207,7 +213,7 @@ elif mode == "📝 SAISIE":
             p_sel = st.selectbox("Sélectionner le produit", produits_dispo)
             c1, c2 = st.columns(2)
             q = c1.number_input("Qté", min_value=1)
-            dt = c2.text_input("Détails / Lieu d'installation")
+            dt = c2.text_input("Détails / Lieu d'installation (ex: Imm 1 - 5ème)")
             p_s = st.file_uploader(f"Photo (optionnel)", key="photo_ep")
             
             if st.button(f"Valider {spec}"):
