@@ -1,148 +1,110 @@
 import streamlit as st
 import pandas as pd
+import base64
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Les Orchidées PRO", layout="wide")
 
-# --- INITIALISATION UNIQUE DU STOCKAGE ---
-# On utilise des noms simples sans accents pour éviter les KeyError
+# --- LOGO ---
+st.image("https://via.placeholder.com/300x100?text=LOGO+LES+ORCHIDEES", width=300)
+
+# --- INITIALISATION DU STOCKAGE PAR TRANCHE ---
 if 'db' not in st.session_state:
     st.session_state.db = {
-        'plans': [], 
-        'marchandises': [], 
-        'electricite': [], # Correction clé
-        'plomberie': [], 
-        'marbre': [], 
-        'ceramique': [], 
-        'salaries': []
+        "Tranche 3": {"plans": [], "marchandises": [], "elec": [], "plomb": [], "marbre": [], "ceram": [], "salaries": []},
+        "Tranche 4": {"plans": [], "marchandises": [], "elec": [], "plomb": [], "marbre": [], "ceram": [], "salaries": []},
+        "Tranche 5": {"plans": [], "marchandises": [], "elec": [], "plomb": [], "marbre": [], "ceram": [], "salaries": []}
     }
 
-# --- DESIGN ---
-st.markdown("""
-    <style>
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] { background-color: #f0f2f6; border-radius: 5px; padding: 10px; }
-    .stTabs [aria-selected="true"] { background-color: #2e7d32 !important; color: white !important; }
-    div.stButton > button:first-child { background-color: #2e7d32; color: white; border-radius: 8px; }
-    </style>
-""", unsafe_allow_html=True)
-
-st.title("🏗️ LES ORCHIDÉES")
-
 # --- NAVIGATION ---
-mode = st.sidebar.radio("SÉLECTIONNER LE MODE", ["📝 SAISIE DE TERRAIN", "🔍 CONSULTATION HISTORIQUE"])
-tranche = st.sidebar.selectbox("CHOISIR LA TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
+st.sidebar.title("MENU PRINCIPAL")
+mode = st.sidebar.radio("MODE", ["📝 SAISIE TERRAIN", "🔍 CONSULTATION"])
+tranche_active = st.sidebar.selectbox("CHOISIR LA TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
 
-# --- FONCTION E-COMMERCE ---
-def fiche_produit(nom, key_id, mode_saisie=True):
-    col1, col2, col3 = st.columns([1, 2, 2])
-    col1.markdown("🖼️") # Place pour le logo
-    col2.write(f"**{nom}**")
-    if mode_saisie:
-        qte = col3.number_input("Qté", min_value=0, key=f"qte_{key_id}")
-        det = col3.text_input("Détails", key=f"det_{key_id}")
-        return {"produit": nom, "quantite": qte, "detail": det}
-    return None
+# Tiroir de données pour la tranche choisie
+data = st.session_state.db[tranche_active]
+
+# --- FONCTION DE LECTURE PDF/PHOTO ---
+def afficher_document(file_data, file_name):
+    if file_name.lower().endswith('.pdf'):
+        base64_pdf = base64.b64encode(file_data).decode('utf-8')
+        pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="700" height="500" type="application/pdf">'
+        st.markdown(pdf_display, unsafe_allow_html=True)
+    else:
+        st.image(file_data, caption=file_name)
 
 # ==========================================
-#             MODE SAISIE
+#                MODE SAISIE
 # ==========================================
-if mode == "📝 SAISIE DE TERRAIN":
-    tabs = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVIE TECHNIQUE", "👥 SALARIÉ"])
+if mode == "📝 SAISIE TERRAIN":
+    tabs = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVIE", "👥 SALARIÉ"])
 
     with tabs[0]:
-        st.subheader("Bouton d'Upload Plans")
-        up = st.file_uploader("Transférer PDF ou Photo", type=['pdf', 'jpg', 'png'])
-        if st.button("✅ CONFIRMER L'UPLOAD"):
-            if up:
-                st.session_state.db['plans'].append({"nom": up.name, "date": "Aujourd'hui"})
-                st.success(f"Plan {up.name} enregistré !")
+        st.subheader(f"Upload Plans - {tranche_active}")
+        file = st.file_uploader("Transférer document", type=['pdf', 'jpg', 'png'], key="up_plans")
+        if st.button("✅ CONFIRMER L'UPLOAD", type="primary"):
+            if file:
+                content = file.read()
+                data['plans'].append({"nom": file.name, "bytes": content})
+                st.success(f"Plan enregistré dans {tranche_active}")
 
     with tabs[1]:
         st.subheader("Entrée Marchandises")
-        fourn = st.selectbox("Fournisseur", ["Lafarge", "Ingelec", "Roca", "Nexans"])
-        desig = st.text_input("Désignation")
+        fourn = st.selectbox("Fournisseur", ["Lafarge", "Ingelec", "Roca", "Nexans"], key="f_list")
+        desig = st.text_input("Désignation Camion/Articles")
         c1, c2 = st.columns(2)
-        f_bl = c1.file_uploader("Photo BL")
-        f_cam = c2.file_uploader("Photo Camion")
-        if st.button("Valider la réception"):
-            st.session_state.db['marchandises'].append({"fournisseur": fourn, "desig": desig})
-            st.success("Réception validée !")
+        bl_img = c1.file_uploader("Photo BL", type=['jpg', 'png'])
+        cam_img = c2.file_uploader("Photo Camion", type=['jpg', 'png'])
+        if st.button("Valider la Réception"):
+            data['marchandises'].append({"Fournisseur": fourn, "Désignation": desig, "Date": pd.Timestamp.now()})
+            st.success("Enregistré dans l'historique local")
 
     with tabs[2]:
         spec = st.radio("Spécialité", ["Electricité", "Plomberie", "Marbre", "Céramique"], horizontal=True)
-        
-        if spec == "Electricité":
-            p1 = fiche_produit("Spot", "spot")
-            p2 = fiche_produit("Prise TV", "ptv")
-            if st.button("Enregistrer Consommation Électricité"):
-                # On force l'ajout seulement si la quantité > 0
-                for p in [p1, p2]:
-                    if p["quantite"] > 0:
-                        st.session_state.db['electricite'].append(p)
-                st.success("Saisie Électricité enregistrée !")
-
-        elif spec == "Plomberie":
-            p1 = fiche_produit("Vasque", "vasq")
-            p2 = fiche_produit("Toilette", "wc")
-            if st.button("Enregistrer Plomberie"):
-                for p in [p1, p2]:
-                    if p["quantite"] > 0:
-                        st.session_state.db['plomberie'].append(p)
-                st.success("Saisie Plomberie enregistrée !")
-
-        elif spec == "Marbre":
-            pers = st.selectbox("Intervenant", ["FETTAH", "SIMO"])
-            bloc = st.text_input("N° Bloc")
-            imm = st.text_input("Immeuble")
-            app = st.text_input("Appartement")
-            if st.button("Valider Marbre"):
-                st.session_state.db['marbre'].append({"nom": pers, "local": f"{imm}-{app}"})
-                st.success("Pointage Marbre fait !")
-
-        elif spec == "Céramique": # Correction page vide
-            zone = st.selectbox("Zone", ["SDB", "Chambre", "Terrasse Appart", "Terrasse Immeuble"])
-            imm_c = st.text_input("Immeuble", key="imm_c")
-            etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème"])
-            if st.button("Valider Céramique"):
-                st.session_state.db['ceramique'].append({"zone": zone, "position": f"Imm {imm_c} - {etage}"})
-                st.success("Position Céramique enregistrée !")
+        if spec in ["Electricité", "Plomberie"]:
+            prods = ["Spot", "Prise TV", "Disjoncteur"] if spec == "Electricité" else ["Vasque", "Toilette", "Robinet"]
+            for p in prods:
+                col_img, col_txt, col_input = st.columns([1, 2, 2])
+                col_img.write("🛒")
+                col_txt.write(f"**{p}**")
+                qte = col_input.number_input(f"Qté {p}", min_value=0, key=f"q_{p}")
+                det = col_input.text_input(f"Détail {p}", key=f"d_{p}")
+                if st.button(f"Valider {p}"):
+                    key_db = "elec" if spec == "Electricité" else "plomb"
+                    data[key_db].append({"Produit": p, "Quantité": qte, "Détail": det})
+                    st.toast(f"{p} enregistré")
 
     with tabs[3]:
-        sal = st.file_uploader("Upload Pointage Salarié", type=['xlsx', 'pdf'])
+        sal_file = st.file_uploader("Excel ou PDF Pointage", type=['xlsx', 'pdf'])
         if st.button("Confirmer Salarié"):
-            if sal:
-                st.session_state.db['salaries'].append({"nom": sal.name})
-                st.success("Document Salarié ajouté !")
+            if sal_file:
+                data['salaries'].append({"nom": sal_file.name, "bytes": sal_file.read()})
+                st.success("Pointage archivé")
 
 # ==========================================
-#           MODE CONSULTATION
+#             MODE CONSULTATION
 # ==========================================
 else:
-    tabs_c = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVIE TECHNIQUE", "👥 SALARIÉ"])
-    
+    st.header(f"🔍 Historique - {tranche_active}")
+    tabs_c = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVIE", "👥 SALARIÉ"])
+
     with tabs_c[0]:
-        st.write("### Plans consultables")
-        if st.session_state.db['plans']:
-            for p in st.session_state.db['plans']:
-                st.info(f"📄 {p['nom']}")
-        else: st.warning("Aucun plan enregistré.")
+        if data['plans']:
+            for idx, p in enumerate(data['plans']):
+                col_n, col_v = st.columns([3, 1])
+                col_n.write(f"📄 {p['nom']}")
+                if col_v.button("👁️ Lire", key=f"read_p_{idx}"):
+                    afficher_document(p['bytes'], p['nom'])
+        else: st.info("Aucun plan dans cette tranche.")
 
     with tabs_c[1]:
-        st.write("### Historique Marchandises")
-        if st.session_state.db['marchandises']:
-            st.table(pd.DataFrame(st.session_state.db['marchandises']))
-        else: st.warning("Historique vide.")
+        if data['marchandises']:
+            st.table(pd.DataFrame(data['marchandises']))
+        else: st.info("Aucune marchandise.")
 
     with tabs_c[2]:
-        spec_c = st.radio("Consulter :", ["Electricité", "Plomberie", "Marbre", "Céramique"], horizontal=True, key="cons_radio")
-        # On affiche le contenu selon la spécialité
-        cle = spec_c.lower().replace("é", "e")
-        if st.session_state.db[cle]:
-            st.table(pd.DataFrame(st.session_state.db[cle]))
-        else: st.warning(f"Pas de données pour {spec_c}")
-
-    with tabs_c[3]:
-        st.write("### Documents Salariés")
-        for s in st.session_state.db['salaries']:
-            st.success(f"📁 {s['nom']}")
+        sub = st.radio("Détail par métier", ["Electricité", "Plomberie", "Marbre", "Céramique"])
+        key_map = {"Electricité": "elec", "Plomberie": "plomb", "Marbre": "marbre", "Céramique": "ceram"}
+        if data[key_map[sub]]:
+            st.table(pd.DataFrame(data[key_map[sub]]))
+        else: st.info(f"Pas de données {sub} pour cette tranche.")
