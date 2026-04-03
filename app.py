@@ -22,10 +22,10 @@ def charger_donnees():
         try:
             with open(DB_FILE, "rb") as f:
                 data = pickle.load(f)
-                # Migration auto si l'ancienne clé 'salaries' existe
-                for t in data:
-                    if 'salaries' in data[t] and 'documents' not in data[t]:
-                        data[t]['documents'] = data[t].pop('salaries')
+                for t in structure_vide:
+                    if t not in data: data[t] = structure_vide[t]
+                    for key in structure_vide[t]:
+                        if key not in data[t]: data[t][key] = []
                 return data
         except: return structure_vide
     return structure_vide
@@ -64,31 +64,26 @@ def creer_pdf_section(titre, data_list, type_rapport):
         for inter, group in df.groupby('Nom'):
             pdf.set_font('Arial', 'B', 11)
             pdf.cell(0, 10, f"Intervenant : {inter}", ln=True)
-            cols = ['DATE', 'TYPE', 'REF', 'IMM', 'ETAGE', 'APPT', 'DETAILS']
-            w = [20, 30, 25, 20, 20, 20, 55]
+            cols = ['DATE', 'TYPE', 'IMM', 'DETAILS']
+            w = [30, 40, 30, 90]
             for i, c in enumerate(cols): pdf.cell(w[i], 8, c, 1, 0, 'C', True)
             pdf.ln()
             pdf.set_font('Arial', '', 8)
             for _, r in group.iterrows():
-                lieu = str(r.get('Lieu', ''))
-                pdf.cell(20, 7, str(r.get('Date', '-')), 1)
-                pdf.cell(30, 7, str(r.get('Type', '-')), 1)
-                pdf.cell(25, 7, str(r.get('Référence', '-')) if r.get('Référence') else '-', 1)
-                pdf.cell(20, 7, lieu.split('Imm ')[1].split(' -')[0] if 'Imm ' in lieu else '-', 1)
-                pdf.cell(20, 7, 'Oui' if any(x in lieu for x in ['RDC','1er','2','3','4']) else '-', 1)
-                pdf.cell(20, 7, lieu.split('Appt ')[1] if 'Appt ' in lieu else '-', 1)
-                pdf.cell(55, 7, lieu[:40], 1, 1)
+                pdf.cell(30, 7, str(r.get('Date', '-')), 1)
+                pdf.cell(40, 7, str(r.get('Type', '-')), 1)
+                pdf.cell(30, 7, str(r.get('Lieu', '-')).split(' -')[0], 1)
+                pdf.cell(90, 7, str(r.get('Lieu', '-')), 1, 1)
             pdf.ln(5)
-
-    elif type_rapport == "marchandises":
+    else:
         pdf.cell(30, 8, 'DATE', 1, 0, 'C', True)
-        pdf.cell(40, 8, 'FOURNISSEUR', 1, 0, 'C', True)
-        pdf.cell(120, 8, 'DÉSIGNATION', 1, 1, 'C', True)
+        pdf.cell(50, 8, 'PRODUIT/ZONE', 1, 0, 'C', True)
+        pdf.cell(110, 8, 'LIEU/DETAILS', 1, 1, 'C', True)
         pdf.set_font('Arial', '', 8)
         for r in data_list:
-            pdf.cell(30, 7, r['Date'], 1)
-            pdf.cell(40, 7, r['Fournisseur'], 1)
-            pdf.cell(120, 7, r['Désignation'], 1, 1)
+            pdf.cell(30, 7, str(r.get('Date', '-')), 1)
+            pdf.cell(50, 7, str(r.get('Produit', r.get('Type', '-'))), 1)
+            pdf.cell(110, 7, str(r.get('Lieu', r.get('Détail', '-'))), 1, 1)
 
     return pdf.output(dest='S').encode('latin-1')
 
@@ -98,16 +93,19 @@ mode = st.sidebar.radio("MODE", ["📝 SAISIE", "🔍 CONSULTATION"])
 tranche = st.sidebar.selectbox("TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
 data = st.session_state.db[tranche]
 
+# ==========================================
+#                MODE SAISIE
+# ==========================================
 if mode == "📝 SAISIE":
     t1, t2, t3, t4 = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVI", "📂 DOCUMENTS"])
     
-    with t1:
+    with t1: # Plans
         up = st.file_uploader("Upload Plan", type=['pdf','jpg','png','jpeg'], key="up_p")
         if st.button("Enregistrer Plan") and up:
             data['plans'].append({"nom": up.name, "content": up.getvalue(), "type": up.type})
             sauvegarder_donnees(); st.success("Plan enregistré !")
             
-    with t2:
+    with t2: # Marchandises
         f = st.selectbox("Fournisseur", ["Lafarge", "Ingelec", "Roca", "Nexans"])
         d = st.text_input("Désignation")
         c1, c2 = st.columns(2)
@@ -117,66 +115,79 @@ if mode == "📝 SAISIE":
             data['marchandises'].append({"Fournisseur":f, "Désignation":d, "Date":pd.Timestamp.now().strftime("%d/%m"), "photo_bl":p_bl.getvalue() if p_bl else None, "photo_cam":p_cam.getvalue() if p_cam else None})
             sauvegarder_donnees(); st.success("Réception enregistrée")
 
-    with t3:
+    with t3: # SUIVI (Partie corrigée)
         spec = st.radio("Métier", ["Électricité", "Plomberie", "Marbre", "Céramique"], horizontal=True)
-        # ... (Logique de saisie Marbre/Céram reste identique) ...
+        
         if spec == "Marbre":
             interv = st.selectbox("Intervenant", ["FETTAH", "Simo"])
             type_m = st.selectbox("Type", ["Gris Bold", "White Sand", "Blanc Carrara"])
             imm = st.text_input("Immeuble")
-            if st.button("Valider Marbre"):
-                data['marbre'].append({"Nom":interv, "Type":type_m, "Lieu":f"Imm {imm}", "Date":pd.Timestamp.now().strftime("%d/%m")})
-                sauvegarder_donnees(); st.success("Marbre enregistré")
+            etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème"])
+            p_m = st.file_uploader("Photo Marbre")
+            if st.button("Enregistrer Marbre"):
+                data['marbre'].append({"Nom":interv, "Type":type_m, "Lieu":f"Imm {imm} - {etage}", "Date":pd.Timestamp.now().strftime("%d/%m"), "photo":p_m.getvalue() if p_m else None})
+                sauvegarder_donnees(); st.success(f"Marbre enregistré pour {interv}")
+        
+        elif spec == "Céramique":
+            z = st.selectbox("Zone", ["SDB", "Chambre", "Terrasse"])
+            im_c = st.text_input("Immeuble")
+            et = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème"])
+            p_c = st.file_uploader("Photo Céram")
+            if st.button("Enregistrer Céramique"):
+                data['ceram'].append({"Type":z, "Lieu":f"Imm {im_c} - {et}", "Date":pd.Timestamp.now().strftime("%d/%m"), "photo":p_c.getvalue() if p_c else None})
+                sauvegarder_donnees(); st.success("Céramique enregistrée")
 
-    with t4:
-        up_doc = st.file_uploader("Upload Document (PDF, Excel, Img)", type=['pdf', 'xlsx', 'jpg', 'png', 'jpeg'])
-        desc_doc = st.text_input("Nom ou description du document")
-        if st.button("Enregistrer Document") and up_doc:
-            nom_final = desc_doc if desc_doc else up_doc.name
-            data['documents'].append({"nom": nom_final, "content": up_doc.getvalue(), "type": up_doc.type, "filename": up_doc.name})
-            sauvegarder_donnees(); st.success("Document ajouté à la bibliothèque")
+        else: # Elec / Plomb
+            items = ["Spot", "Prise TV", "Tableau"] if spec == "Électricité" else ["Vasque", "Toilette", "Mélangeur"]
+            for i in items:
+                c1, c2, c3 = st.columns([2,1,2])
+                q = c2.number_input("Qté", min_value=0, key=f"q_{i}")
+                dt = c1.text_input(f"Détails {i}", key=f"d_{i}")
+                p_s = c3.file_uploader(f"Photo {i}", key=f"ps_{i}")
+                if st.button(f"Valider {i}", key=f"b_{i}"):
+                    key_m = "elec" if spec == "Électricité" else "plomb"
+                    data[key_m].append({"Produit":i, "Qté":q, "Détail":dt, "Date":pd.Timestamp.now().strftime("%d/%m"), "photo":p_s.getvalue() if p_s else None})
+                    sauvegarder_donnees(); st.toast(f"{i} validé !")
 
-else: # CONSULTATION
+    with t4: # DOCUMENTS
+        up_doc = st.file_uploader("Fichier (PDF, Excel, Img)", type=['pdf', 'xlsx', 'jpg', 'png', 'jpeg'])
+        desc_doc = st.text_input("Titre du document")
+        if st.button("Ajouter à la bibliothèque") and up_doc:
+            data['documents'].append({"nom": desc_doc if desc_doc else up_doc.name, "content": up_doc.getvalue(), "type": up_doc.type, "filename": up_doc.name})
+            sauvegarder_donnees(); st.success("Document enregistré")
+
+# ==========================================
+#           MODE CONSULTATION
+# ==========================================
+else:
     st.header(f"🔍 Consultation - {tranche}")
     c1, c2, c3, c4 = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVI", "📂 DOCUMENTS"])
 
     with c1:
-        st.subheader("Plans Techniques")
         for p in data['plans']:
             with st.expander(f"📄 {p['nom']}"):
-                st.download_button("📂 Ouvrir / Télécharger", data=p['content'], file_name=p['nom'], mime=p.get('type', 'application/octet-stream'))
-                if p.get('type', '').startswith('image'):
-                    st.image(p['content'])
+                st.download_button("📂 Télécharger", data=p['content'], file_name=p['nom'])
+                if p.get('type', '').startswith('image'): st.image(p['content'])
 
     with c2:
-        st.download_button("📥 Rapport Marchandises (PDF)", data=creer_pdf_section("MARCHANDISES", data['marchandises'], "marchandises"), file_name=f"Rapport_Marchandises_{tranche}.pdf")
+        st.download_button("📥 Rapport Marchandises (PDF)", data=creer_pdf_section("MARCHANDISES", data['marchandises'], "marchandises"), file_name="Rapport_Marchandises.pdf")
         for m in data['marchandises']:
             with st.expander(f"📦 {m['Fournisseur']} - {m['Désignation']}"):
-                ca, cb = st.columns(2)
-                if m.get('photo_bl'): ca.image(m['photo_bl'], caption="BL")
-                if m.get('photo_cam'): cb.image(m['photo_cam'], caption="Camion")
+                if m.get('photo_bl'): st.image(m['photo_bl'], width=300, caption="BL")
 
     with c3:
-        sel = st.radio("Métier pour le rapport", ["Marbre", "Céramique", "Électricité", "Plomberie"], horizontal=True)
+        sel = st.radio("Métier", ["Marbre", "Céramique", "Électricité", "Plomberie"], horizontal=True)
         k_map = {"Marbre": "marbre", "Céramique": "ceram", "Électricité": "elec", "Plomberie": "plomb"}
-        st.download_button(f"📥 Rapport {sel} (PDF)", data=creer_pdf_section(sel.upper(), data[k_map[sel]], k_map[sel]), file_name=f"Rapport_{sel}_{tranche}.pdf")
+        st.download_button(f"📥 Rapport {sel} (PDF)", data=creer_pdf_section(sel.upper(), data[k_map[sel]], k_map[sel]), file_name=f"Rapport_{sel}.pdf")
         for entry in data[k_map[sel]]:
-            with st.expander(f"🛠️ {entry.get('Type', 'Suivi')} ({entry.get('Date')})"):
-                st.write(f"**Lieu :** {entry.get('Lieu')}")
+            with st.expander(f"🛠️ {entry.get('Type', entry.get('Produit', 'Suivi'))} ({entry.get('Date')})"):
+                if entry.get('photo'): st.image(entry['photo'], width=400)
+                st.write(f"**Lieu/Détail :** {entry.get('Lieu') or entry.get('Détail', '')}")
 
     with c4:
-        st.subheader("📁 Bibliothèque de Documents")
-        if not data['documents']:
-            st.info("Aucun document dans cette tranche.")
         for d in data['documents']:
             with st.expander(f"📑 {d['nom']}"):
-                st.write(f"Fichier : `{d.get('filename', 'Inconnu')}`")
-                st.download_button("📂 Télécharger / Lire le document", data=d['content'], file_name=d.get('filename', d['nom']), mime=d.get('type', 'application/octet-stream'))
-                
-                # Lecture directe si c'est un Excel
+                st.download_button("📂 Ouvrir", data=d['content'], file_name=d.get('filename', d['nom']))
                 if d.get('filename', '').lower().endswith('.xlsx'):
-                    try:
-                        df = pd.read_excel(io.BytesIO(d['content']), engine='openpyxl')
-                        st.dataframe(df, use_container_width=True)
-                    except Exception as e:
-                        st.error("Aperçu du tableau impossible.")
+                    df = pd.read_excel(io.BytesIO(d['content']), engine='openpyxl')
+                    st.dataframe(df, use_container_width=True)
