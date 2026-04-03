@@ -37,33 +37,18 @@ if 'db' not in st.session_state:
     st.session_state.db = charger_donnees()
 
 # --- NAVIGATION ---
+st.sidebar.title("LES ORCHIDÉES")
 mode = st.sidebar.radio("SÉLECTIONNER LE MODE", ["📝 SAISIE", "🔍 CONSULTATION"])
 tranche = st.sidebar.selectbox("CHOISIR LA TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
 data = st.session_state.db[tranche]
 
-# --- FONCTION DE CONSULTATION SANS TÉLÉCHARGEMENT ---
+# --- FONCTION APERÇU EXCEL ---
 def consulter_excel(file_bytes, file_name):
     try:
-        # On utilise io.BytesIO pour lire le fichier en mémoire vive
         df = pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl')
-        st.success(f"Affichage de : {file_name}")
         st.dataframe(df, use_container_width=True)
-    except Exception as e:
-        st.error("L'affichage automatique a échoué. Cliquez sur le bouton bleu pour voir le fichier.")
-        # Solution de secours : Bouton de visualisation JS
-        b64 = base64.b64encode(file_bytes).decode()
-        js = f"""
-        <script>
-        function openExcel() {{
-            var blob = new Blob([new Uint8Array(atob("{b64}").split("").map(c => c.charCodeAt(0)))], {{type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}});
-            window.open(URL.createObjectURL(blob), '_blank');
-        }}
-        </script>
-        <button onclick="openExcel()" style="background:#007bff;color:white;border:none;padding:12px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">
-            👁️ VOIR DANS UN NOUVEL ONGLET (SANS TÉLÉCHARGER)
-        </button>
-        """
-        st.components.v1.html(js, height=60)
+    except:
+        st.error("Impossible d'afficher l'aperçu direct.")
 
 # ==========================================
 #                MODE SAISIE
@@ -93,8 +78,9 @@ if mode == "📝 SAISIE":
             sauvegarder_donnees()
             st.success("Réception enregistrée !")
 
-    with t3: # SUIVI DÉTAILLÉ
+    with t3: # SUIVI DÉVELOPPÉ
         spec = st.radio("Métier", ["Électricité", "Plomberie", "Marbre", "Céramique"], horizontal=True)
+        
         if spec in ["Électricité", "Plomberie"]:
             items = ["Spot", "Prise TV", "Disjoncteur"] if spec == "Électricité" else ["Vasque", "Toilette", "Robinet"]
             for i in items:
@@ -107,21 +93,51 @@ if mode == "📝 SAISIE":
                     data[k].append({"Produit": i, "Qté": q, "Détail": dt, "Date": pd.Timestamp.now().strftime("%d/%m"), "photo": p_suivi.getvalue() if p_suivi else None})
                     sauvegarder_donnees()
                     st.toast(f"{i} validé !")
+
         elif spec == "Marbre":
-            p = st.selectbox("Intervenant", ["FETTAH", "Simo"])
-            im = st.text_input("Immeuble")
-            ap = st.text_input("Appartement")
-            p_m = st.file_uploader("Photo Marbre", type=['jpg','jpeg','png'])
-            if st.button("Valider Marbre"):
-                data['marbre'].append({"Nom": p, "Lieu": f"Imm {im} - App {ap}", "Date": pd.Timestamp.now().strftime("%d/%m"), "photo": p_m.getvalue() if p_m else None})
+            interv = st.selectbox("Intervenant", ["FETTAH", "Simo"], key="m_inter")
+            type_m = st.selectbox("Type de Marbre", ["Gris Bold", "White Sand", "Blanc Carrara"], key="m_type")
+            
+            fourn = None
+            if type_m == "Blanc Carrara":
+                fourn = st.selectbox("Fournisseur", ["Graziani", "Caro Colombi", "Lorenzoni"], key="m_fourn")
+            
+            imm = st.text_input("Immeuble", key="m_imm")
+            
+            # Logique conditionnelle selon le type
+            etage = None
+            appt = None
+            if type_m != "White Sand": # Pas d'étage pour les façades White Sand
+                etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème"], key="m_etage")
+                if type_m == "Blanc Carrara":
+                    appt = st.text_input("Appartement", key="m_appt")
+
+            p_m = st.file_uploader("Photo Marbre", type=['jpg','jpeg','png'], key="p_m_up")
+            
+            if st.button("Valider Saisie Marbre"):
+                lieu = f"Imm {imm}"
+                if etage: lieu += f" - {etage}"
+                if appt: lieu += f" - Appt {appt}"
+                if type_m == "White Sand": lieu += " (Façade)"
+                
+                data['marbre'].append({
+                    "Nom": interv, "Type": type_m, "Fournisseur": fourn, 
+                    "Lieu": lieu, "Date": pd.Timestamp.now().strftime("%d/%m"),
+                    "photo": p_m.getvalue() if p_m else None
+                })
                 sauvegarder_donnees()
-                st.success("Marbre OK")
+                st.success(f"Saisie {type_m} validée !")
+
         elif spec == "Céramique":
             z = st.selectbox("Zone", ["SDB", "Chambre", "Terrasse"])
+            im_c = st.text_input("Immeuble")
             et = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème"])
-            p_c = st.file_uploader("Photo Céramique", type=['jpg','jpeg','png'])
+            p_c = st.file_uploader("Photo Céramique", type=['jpg','jpeg','png'], key="p_c_up")
             if st.button("Valider Céramique"):
-                data['ceram'].append({"Type": z, "Lieu": f"Etage {et}", "Date": pd.Timestamp.now().strftime("%d/%m"), "photo": p_c.getvalue() if p_c else None})
+                data['ceram'].append({
+                    "Type": z, "Lieu": f"Imm {im_c} - Etage {et}", 
+                    "Date": pd.Timestamp.now().strftime("%d/%m"), "photo": p_c.getvalue() if p_c else None
+                })
                 sauvegarder_donnees()
                 st.success("Céramique OK")
 
@@ -130,7 +146,7 @@ if mode == "📝 SAISIE":
         if st.button("Confirmer Salarié") and up_s:
             data['salaries'].append({"nom": up_s.name, "content": up_s.getvalue()})
             sauvegarder_donnees()
-            st.success("Fiche salarié enregistrée !")
+            st.success("Fiche enregistrée !")
 
 # ==========================================
 #           MODE CONSULTATION
@@ -143,7 +159,7 @@ else:
         for p in data['plans']:
             with st.expander(f"📁 {p['nom']}"):
                 b64 = base64.b64encode(p['content']).decode()
-                st.components.v1.html(f'<button onclick="window.open(URL.createObjectURL(new Blob([new Uint8Array(atob(\'{b64}\').split(\'\').map(c=>c.charCodeAt(0)))] , {{type:\'application/pdf\'}})), \'_blank\')" style="width:100%; padding:10px; background:#007bff; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">👁️ VOIR LE PLAN</button>', height=50)
+                st.components.v1.html(f'<button onclick="window.open(URL.createObjectURL(new Blob([new Uint8Array(atob(\'{b64}\').split(\'\').map(c=>c.charCodeAt(0)))] , {{type:\'application/pdf\'}})), \'_blank\')" style="width:100%; padding:10px; background:#007bff; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">👁️ VOIR LE DOCUMENT</button>', height=50)
 
     with c2:
         for m in data['marchandises']:
@@ -153,18 +169,18 @@ else:
                 if m.get('photo_cam'): cb.image(m['photo_cam'], caption="Camion")
 
     with c3:
-        sel = st.radio("Métier", ["Électricité", "Plomberie", "Marbre", "Céramique"], horizontal=True)
+        sel = st.radio("Métier", ["Électricité", "Plomberie", "Marbre", "Céramique"], horizontal=True, key="c_radio")
         k_map = {"Électricité": "elec", "Plomberie": "plomb", "Marbre": "marbre", "Céramique": "ceram"}
         for entry in data[k_map[sel]]:
-            label = entry.get('Produit') or entry.get('Nom') or entry.get('Type')
-            with st.expander(f"🛠️ {label} ({entry.get('Date')})"):
+            title = f"{entry.get('Type', '')} {entry.get('Produit', '')} {entry.get('Nom', '')}"
+            with st.expander(f"🛠️ {title} - {entry.get('Lieu') or entry.get('Détail', '')} ({entry.get('Date')})"):
                 if entry.get('photo'): st.image(entry['photo'], width=400)
-                st.write(f"**Lieu/Détail :** {entry.get('Lieu') or entry.get('Détail', '')}")
+                if entry.get('Fournisseur'): st.info(f"Fournisseur : {entry['Fournisseur']}")
 
     with c4:
         for s in data['salaries']:
-            with st.expander(f"📊 Fichier : {s['nom']}"):
-                if s['nom'].lower().endswith('.xlsx') or s['nom'].lower().endswith('.xls'):
+            with st.expander(f"📊 {s['nom']}"):
+                if s['nom'].lower().endswith('.xlsx'):
                     consulter_excel(s['content'], s['nom'])
                 else:
                     b64 = base64.b64encode(s['content']).decode()
