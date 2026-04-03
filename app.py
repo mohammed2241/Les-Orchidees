@@ -20,8 +20,11 @@ def charger_donnees():
         try:
             with open(DB_FILE, "rb") as f:
                 data = pickle.load(f)
+                # Sécurité : on s'assure que toutes les rubriques existent
                 for t in structure_vide:
                     if t not in data: data[t] = structure_vide[t]
+                    for key in structure_vide[t]:
+                        if key not in data[t]: data[t][key] = []
                 return data
         except: return structure_vide
     return structure_vide
@@ -34,28 +37,23 @@ if 'db' not in st.session_state:
     st.session_state.db = charger_donnees()
 
 # --- NAVIGATION ---
+st.sidebar.title("LES ORCHIDÉES")
 mode = st.sidebar.radio("SÉLECTIONNER LE MODE", ["📝 SAISIE", "🔍 CONSULTATION"])
 tranche = st.sidebar.selectbox("CHOISIR LA TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
 data = st.session_state.db[tranche]
 
 # --- FONCTIONS D'OUVERTURE ---
-def bouton_ouvrir_general(file_bytes, file_name):
+def bouton_ouvrir_pdf_image(file_bytes, file_name, label="👁️ VOIR LE DOCUMENT"):
     b64 = base64.b64encode(file_bytes).decode()
     mime = "application/pdf" if file_name.lower().endswith('.pdf') else "image/jpeg"
     js = f"""<script>function openDoc(){{var b=atob("{b64}"),n=new Array(b.length);for(var i=0;i<b.length;i++)n[i]=b.charCodeAt(i);var blob=new Blob([new Uint8Array(n)],{{type:"{mime}"}});window.open(URL.createObjectURL(blob),'_blank');}}</script>
-    <button onclick="openDoc()" style="background:#007bff;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">👁️ VOIR LE DOCUMENT</button>"""
+    <button onclick="openDoc()" style="background:#007bff;color:white;border:none;padding:10px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">{label}</button>"""
     st.components.v1.html(js, height=50)
 
 def bouton_excel_tablette(file_bytes, file_name):
     b64 = base64.b64encode(file_bytes).decode()
-    # Lien utilisant le protocole ms-excel pour forcer l'ouverture dans l'app
     href = f'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}'
-    html = f"""
-    <a href="{href}" download="{file_name}" style="text-decoration:none;">
-        <button style="background:#217346;color:white;border:none;padding:12px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">
-            📊 OUVRIR DANS EXCEL (TABLETTE)
-        </button>
-    </a>"""
+    html = f"""<a href="{href}" download="{file_name}" style="text-decoration:none;"><button style="background:#217346;color:white;border:none;padding:12px;border-radius:5px;width:100%;cursor:pointer;font-weight:bold;">📊 OUVRIR DANS EXCEL (TABLETTE)</button></a>"""
     st.markdown(html, unsafe_allow_html=True)
 
 # ==========================================
@@ -86,7 +84,7 @@ if mode == "📝 SAISIE":
             sauvegarder_donnees()
             st.success("Réception enregistrée !")
 
-    with t3: # SUIVI DÉTAILLÉ (RÉTABLI)
+    with t3: # SUIVI DÉTAILLÉ
         spec = st.radio("Métier", ["Électricité", "Plomberie", "Marbre", "Céramique"], horizontal=True)
         if spec in ["Électricité", "Plomberie"]:
             items = ["Spot", "Prise TV", "Disjoncteur"] if spec == "Électricité" else ["Vasque", "Toilette", "Robinet"]
@@ -114,4 +112,49 @@ if mode == "📝 SAISIE":
             et = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème"])
             p_c = st.file_uploader("Photo Céramique", type=['jpg','jpeg','png'])
             if st.button("Valider Céramique"):
-                data['ceram'].append({"Type": z,
+                data['ceram'].append({"Type": z, "Lieu": f"Etage {et}", "Date": pd.Timestamp.now().strftime("%d/%m"), "photo": p_c.getvalue() if p_c else None})
+                sauvegarder_donnees()
+                st.success("Céramique OK")
+
+    with t4: # SALARIÉ
+        up_s = st.file_uploader("Pointage Excel/PDF", type=['pdf', 'xlsx'], key="up_sal")
+        if st.button("Confirmer Salarié") and up_s:
+            data['salaries'].append({"nom": up_s.name, "content": up_s.getvalue()})
+            sauvegarder_donnees()
+            st.success("Fiche salarié enregistrée !")
+
+# ==========================================
+#           MODE CONSULTATION
+# ==========================================
+else:
+    st.header(f"🔍 Consultation - {tranche}")
+    c1, c2, c3, c4 = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVI", "👥 SALARIÉ"])
+
+    with c1:
+        for p in data['plans']:
+            with st.expander(f"📁 {p['nom']}"): bouton_ouvrir_pdf_image(p['content'], p['nom'])
+
+    with c2:
+        for m in data['marchandises']:
+            with st.expander(f"📦 {m['Fournisseur']} - {m['Désignation']} ({m['Date']})"):
+                ca, cb = st.columns(2)
+                if m.get('photo_bl'): ca.image(m['photo_bl'], caption="BL")
+                if m.get('photo_cam'): cb.image(m['photo_cam'], caption="Camion")
+
+    with c3:
+        sel = st.radio("Métier", ["Électricité", "Plomberie", "Marbre", "Céramique"], horizontal=True)
+        k_map = {"Électricité": "elec", "Plomberie": "plomb", "Marbre": "marbre", "Céramique": "ceram"}
+        for entry in data[k_map[sel]]:
+            label = entry.get('Produit') or entry.get('Nom') or entry.get('Type')
+            with st.expander(f"🛠️ {label} ({entry.get('Date')})"):
+                if entry.get('photo'): st.image(entry['photo'], width=400)
+                st.write(f"**Lieu/Détail :** {entry.get('Lieu') or entry.get('Détail', '')}")
+                if 'Qté' in entry: st.write(f"**Quantité :** {entry['Qté']}")
+
+    with c4:
+        for s in data['salaries']:
+            with st.expander(f"📊 Fichier : {s['nom']}"):
+                if s['nom'].lower().endswith('.xlsx'):
+                    bouton_excel_tablette(s['content'], s['nom'])
+                else:
+                    bouton_ouvrir_pdf_image(s['content'], s['nom'])
