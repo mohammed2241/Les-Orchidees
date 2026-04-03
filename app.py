@@ -78,7 +78,7 @@ if mode == "📝 SAISIE":
             sauvegarder_donnees()
             st.success("Réception enregistrée !")
 
-    with t3: # SUIVI DÉVELOPPÉ
+    with t3: # SUIVI MARBRE DÉVELOPPÉ
         spec = st.radio("Métier", ["Électricité", "Plomberie", "Marbre", "Céramique"], horizontal=True)
         
         if spec in ["Électricité", "Plomberie"]:
@@ -99,15 +99,16 @@ if mode == "📝 SAISIE":
             type_m = st.selectbox("Type de Marbre", ["Gris Bold", "White Sand", "Blanc Carrara"], key="m_type")
             
             fourn = None
+            ref_carrara = None
             if type_m == "Blanc Carrara":
                 fourn = st.selectbox("Fournisseur", ["Graziani", "Caro Colombi", "Lorenzoni"], key="m_fourn")
+                ref_carrara = st.text_input("Référence (Lot/Bloc)", placeholder="Ex: Bloc A-102", key="m_ref")
             
             imm = st.text_input("Immeuble", key="m_imm")
             
-            # Logique conditionnelle selon le type
             etage = None
             appt = None
-            if type_m != "White Sand": # Pas d'étage pour les façades White Sand
+            if type_m != "White Sand":
                 etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème"], key="m_etage")
                 if type_m == "Blanc Carrara":
                     appt = st.text_input("Appartement", key="m_appt")
@@ -121,12 +122,16 @@ if mode == "📝 SAISIE":
                 if type_m == "White Sand": lieu += " (Façade)"
                 
                 data['marbre'].append({
-                    "Nom": interv, "Type": type_m, "Fournisseur": fourn, 
-                    "Lieu": lieu, "Date": pd.Timestamp.now().strftime("%d/%m"),
+                    "Nom": interv, 
+                    "Type": type_m, 
+                    "Fournisseur": fourn, 
+                    "Référence": ref_carrara,
+                    "Lieu": lieu, 
+                    "Date": pd.Timestamp.now().strftime("%d/%m"),
                     "photo": p_m.getvalue() if p_m else None
                 })
                 sauvegarder_donnees()
-                st.success(f"Saisie {type_m} validée !")
+                st.success(f"Saisie {type_m} enregistrée !")
 
         elif spec == "Céramique":
             z = st.selectbox("Zone", ["SDB", "Chambre", "Terrasse"])
@@ -176,6 +181,7 @@ else:
             with st.expander(f"🛠️ {title} - {entry.get('Lieu') or entry.get('Détail', '')} ({entry.get('Date')})"):
                 if entry.get('photo'): st.image(entry['photo'], width=400)
                 if entry.get('Fournisseur'): st.info(f"Fournisseur : {entry['Fournisseur']}")
+                if entry.get('Référence'): st.warning(f"Référence : {entry['Référence']}")
 
     with c4:
         for s in data['salaries']:
