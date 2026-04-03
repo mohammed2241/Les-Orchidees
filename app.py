@@ -7,7 +7,7 @@ import pickle
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Les Orchidées PRO", layout="wide")
 
-# --- PERSISTENCE DES DONNÉES (Sauvegarde automatique) ---
+# --- PERSISTENCE DES DONNÉES ---
 DB_FILE = "data_chantier.pkl"
 
 def charger_donnees():
@@ -31,31 +31,27 @@ if 'db' not in st.session_state:
 
 # --- NAVIGATION ---
 st.sidebar.title("LES ORCHIDÉES")
-mode = st.sidebar.radio("SÉLECTIONNER LE MODE", ["📝 SAISIE DE TERRAIN", "🔍 CONSULTATION HISTORIQUE"])
-tranche = st.sidebar.selectbox("CHOISIR LA TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
+mode = st.sidebar.radio("MODE", ["📝 SAISIE", "🔍 CONSULTATION"])
+tranche = st.sidebar.selectbox("TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
 data = st.session_state.db[tranche]
 
-# --- FONCTION DE LECTURE AUTOMATIQUE (NOUVEL ONGLET) ---
-def bouton_lecture_directe(file_bytes, file_name, label="Lire le document"):
+# --- FONCTION D'OUVERTURE (SÉCURISÉE) ---
+def afficher_bouton_lecture(file_bytes, file_name, key):
+    # Encodage seulement au moment de l'affichage pour éviter de bloquer l'onglet
     b64 = base64.b64encode(file_bytes).decode()
-    # Détection du type de fichier pour le navigateur
-    mime_type = "application/pdf" if file_name.lower().endswith('.pdf') else "image/jpeg"
-    
-    # Lien HTML qui simule un bouton et ouvre dans un nouvel onglet (_blank)
-    href = f'''
-        <a href="data:{mime_type};base64,{b64}" target="_blank" style="text-decoration:none;">
-            <div style="background-color:#2e7d32; color:white; padding:12px; border-radius:8px; text-align:center; font-weight:bold; cursor:pointer;">
-                📖 {label}
-            </div>
-        </a>
-    '''
-    st.markdown(href, unsafe_allow_html=True)
+    if file_name.lower().endswith('.pdf'):
+        # Utilisation de l'objet PDF natif pour éviter le blocage Chrome
+        pdf_display = f'<a href="data:application/pdf;base64,{b64}" target="_blank" style="text-decoration:none;"><div style="background-color:#1e88e5; color:white; padding:10px; border-radius:5px; text-align:center; font-weight:bold;">📄 OUVRIR LE PDF</div></a>'
+    else:
+        # Pour les images (JPG/PNG)
+        pdf_display = f'<a href="data:image/jpeg;base64,{b64}" target="_blank" style="text-decoration:none;"><div style="background-color:#43a047; color:white; padding:10px; border-radius:5px; text-align:center; font-weight:bold;">🖼️ VOIR L\'IMAGE</div></a>'
+    st.markdown(pdf_display, unsafe_allow_html=True)
 
 # ==========================================
 #                MODE SAISIE
 # ==========================================
-if mode == "📝 SAISIE DE TERRAIN":
-    t1, t2, t3, t4 = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVIE", "👥 SALARIÉ"])
+if mode == "📝 SAISIE":
+    t1, t2, t3, t4 = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVI", "👥 SALARIÉ"])
 
     with t1:
         up_p = st.file_uploader("Upload Plan", type=['pdf', 'jpg', 'png', 'jpeg'], key="up_p")
@@ -71,20 +67,25 @@ if mode == "📝 SAISIE DE TERRAIN":
         if st.button("Valider Réception", key="btn_m"):
             data['marchandises'].append({"Fournisseur": f, "Désignation": d, "Date": pd.Timestamp.now().strftime("%d/%m %H:%M")})
             sauvegarder_donnees()
-            st.success("Réception archivée !")
+            st.success("Réception ajoutée !")
 
     with t3:
         spec = st.radio("Métier", ["Électricité", "Plomberie", "Marbre", "Céramique"], horizontal=True)
-        # ... (Formulaires Marbre/Céram identiques au précédent)
         if spec == "Marbre":
-            p = st.selectbox("Intervenant", ["FETTAH", "Simo"], key="m_p")
+            p = st.selectbox("Nom", ["FETTAH", "Simo"], key="m_p")
             im = st.text_input("Immeuble", key="m_i")
             ap = st.text_input("Appart", key="m_a")
             if st.button("Valider Marbre", key="btn_marbre"):
                 data['marbre'].append({"Nom": p, "Lieu": f"Imm {im} - App {ap}"})
                 sauvegarder_donnees()
-                st.success("Marbre enregistré")
-        # (Note: Le reste du suivi technique est inclus dans le code complet)
+                st.success("Enregistré")
+        elif spec == "Céramique":
+            z = st.selectbox("Zone", ["SDB", "Chambre", "Terrasse"], key="c_z")
+            im_c = st.text_input("Immeuble", key="c_i")
+            if st.button("Valider Céramique", key="btn_ceram"):
+                data['ceram'].append({"Zone": z, "Lieu": f"Imm {im_c}"})
+                sauvegarder_donnees()
+                st.success("Enregistré")
 
     with t4:
         up_s = st.file_uploader("Fichier Salarié", type=['xlsx', 'pdf'], key="up_s")
@@ -92,23 +93,20 @@ if mode == "📝 SAISIE DE TERRAIN":
             if up_s:
                 data['salaries'].append({"nom": up_s.name, "content": up_s.getvalue()})
                 sauvegarder_donnees()
-                st.success("Pointage ajouté !")
+                st.success("Ajouté !")
 
 # ==========================================
 #           MODE CONSULTATION
 # ==========================================
 else:
-    st.header(f"🔍 Consultation - {tranche}")
-    c1, c2, c3, c4 = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVIE", "👥 SALARIÉ"])
+    st.header(f"🔍 Historique - {tranche}")
+    c1, c2, c3, c4 = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVI", "👥 SALARIÉ"])
 
     with c1:
-        if data['plans']:
-            for p in data['plans']:
-                col_n, col_b = st.columns([3, 2])
-                col_n.write(f"📄 **{p['nom']}**")
-                with col_b:
-                    bouton_lecture_directe(p['content'], p['nom'], "Ouvrir dans un onglet")
-        else: st.write("Aucun plan.")
+        for idx, p in enumerate(data['plans']):
+            with st.expander(f"📄 Plan : {p['nom']}"):
+                # On n'affiche le bouton qu'à l'ouverture de l'expander pour gagner en vitesse
+                afficher_bouton_lecture(p['content'], p['nom'], f"p_{idx}")
 
     with c2:
         if data['marchandises']: st.table(pd.DataFrame(data['marchandises']))
@@ -119,10 +117,6 @@ else:
         if data[k_map[sel]]: st.table(pd.DataFrame(data[k_map[sel]]))
 
     with c4:
-        if data['salaries']:
-            for s in data['salaries']:
-                col_n, col_b = st.columns([3, 2])
-                col_n.write(f"📁 **{s['nom']}**")
-                with col_b:
-                    bouton_lecture_directe(s['content'], s['nom'], "Lire le pointage")
-        else: st.write("Aucun document salarié.")
+        for idx, s in enumerate(data['salaries']):
+            with st.expander(f"👥 Salarié : {s['nom']}"):
+                afficher_bouton_lecture(s['content'], s['nom'], f"s_{idx}")
