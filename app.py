@@ -20,7 +20,6 @@ def charger_donnees():
         try:
             with open(DB_FILE, "rb") as f:
                 data = pickle.load(f)
-                # Vérification que toutes les clés existent pour éviter KeyError
                 for t in structure_vide:
                     if t not in data: data[t] = structure_vide[t]
                 return data
@@ -35,96 +34,95 @@ if 'db' not in st.session_state:
     st.session_state.db = charger_donnees()
 
 # --- NAVIGATION ---
-mode = st.sidebar.radio("SÉLECTIONNER LE MODE", ["📝 SAISIE", "🔍 CONSULTATION"])
-tranche = st.sidebar.selectbox("CHOISIR LA TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
+mode = st.sidebar.radio("MODE", ["📝 SAISIE", "🔍 CONSULTATION"])
+tranche = st.sidebar.selectbox("TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
 data = st.session_state.db[tranche]
 
-# --- FONCTION DE VISUALISATION (ANTI-PLANTAGE) ---
-def afficher_fichier(file_bytes, file_name):
+# --- FONCTION DE LECTURE INTÉGRÉE ---
+def lecteur_integre(file_bytes, file_name):
     ext = file_name.lower().split('.')[-1]
     
     if ext in ['jpg', 'jpeg', 'png']:
-        st.image(file_bytes, caption=file_name)
+        st.image(file_bytes, use_container_width=True)
     elif ext == 'pdf':
-        try:
-            b64 = base64.b64encode(file_bytes).decode()
-            pdf_display = f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="500" type="application/pdf"></iframe>'
-            st.markdown(pdf_display, unsafe_allow_html=True)
-        except:
-            st.warning("Impossible d'afficher le PDF directement sur cet appareil.")
+        # Encodage pour l'affichage intégré
+        base64_pdf = base64.b64encode(file_bytes).decode('utf-8')
+        # Création d'une zone de lecture (Embed)
+        pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf">'
+        st.markdown(pdf_display, unsafe_allow_html=True)
     else:
-        st.info(f"Fichier {ext.upper()} : Utilisez le bouton ci-dessous pour l'ouvrir.")
+        st.warning(f"Le format .{ext} ne peut pas être lu directement. Utilisez le bouton ci-dessous.")
     
-    st.download_button(f"📥 Télécharger {file_name}", data=file_bytes, file_name=file_name, key=os.urandom(5).hex())
+    # On laisse quand même le bouton en bas au cas où
+    st.download_button("📥 Télécharger une copie", data=file_bytes, file_name=file_name, key=os.urandom(5).hex())
 
 # ==========================================
 #                MODE SAISIE
 # ==========================================
 if mode == "📝 SAISIE":
-    tabs = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVI", "👥 SALARIÉ"])
+    t1, t2, t3, t4 = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVI", "👥 SALARIÉ"])
 
-    with tabs[0]: # PLANS
-        up = st.file_uploader("Upload Plan", type=['pdf', 'jpg', 'png', 'jpeg'], key="up_plans")
+    with t1:
+        up = st.file_uploader("Upload Plan", type=['pdf', 'jpg', 'png', 'jpeg'])
         if st.button("✅ Enregistrer Plan"):
             if up:
                 data['plans'].append({"nom": up.name, "content": up.getvalue()})
                 sauvegarder_donnees()
                 st.success("Plan enregistré !")
 
-    with tabs[1]: # MARCHANDISES
-        col1, col2 = st.columns(2)
-        f = col1.selectbox("Fournisseur", ["Lafarge", "Ingelec", "Roca", "Nexans"])
-        d = col2.text_input("Désignation")
+    with t2:
+        f = st.selectbox("Fournisseur", ["Lafarge", "Ingelec", "Roca", "Nexans"])
+        d = st.text_input("Désignation")
         if st.button("Valider Marchandise"):
             data['marchandises'].append({"Fournisseur": f, "Désignation": d, "Date": pd.Timestamp.now().strftime("%d/%m %H:%M")})
             sauvegarder_donnees()
-            st.success("Enregistré !")
+            st.success("OK !")
 
-    with tabs[2]: # SUIVI
-        metier = st.radio("Métier", ["Marbre", "Céramique", "Électricité", "Plomberie"], horizontal=True)
-        if metier == "Marbre":
+    with t3:
+        m = st.radio("Métier", ["Marbre", "Céramique"], horizontal=True)
+        if m == "Marbre":
             p = st.selectbox("Nom", ["FETTAH", "Simo"])
             l = st.text_input("Immeuble / Appart")
             if st.button("Enregistrer Marbre"):
                 data['marbre'].append({"Nom": p, "Lieu": l})
                 sauvegarder_donnees()
                 st.success("OK")
-        elif metier == "Céramique":
-            z = st.text_input("Zone / Immeuble")
+        else:
+            z = st.text_input("Zone")
             if st.button("Enregistrer Céramique"):
                 data['ceram'].append({"Info": z})
                 sauvegarder_donnees()
                 st.success("OK")
 
-    with tabs[3]: # SALARIÉ
-        up_s = st.file_uploader("Pointage", type=['pdf', 'xlsx'], key="up_sal")
+    with t4:
+        up_s = st.file_uploader("Pointage", type=['pdf', 'xlsx'])
         if st.button("Confirmer Salarié"):
             if up_s:
                 data['salaries'].append({"nom": up_s.name, "content": up_s.getvalue()})
                 sauvegarder_donnees()
-                st.success("Pointage enregistré !")
+                st.success("Enregistré !")
 
 # ==========================================
 #           MODE CONSULTATION
 # ==========================================
 else:
-    st.header(f"Historique {tranche}")
+    st.header(f"Consultation {tranche}")
     c1, c2, c3, c4 = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVI", "👥 SALARIÉ"])
 
     with c1:
-        for p in data.get('plans', []):
-            with st.expander(f"📁 Plan : {p['nom']}"):
-                afficher_fichier(p['content'], p['nom'])
+        for p in data['plans']:
+            with st.expander(f"👁️ VOIR : {p['nom']}", expanded=False):
+                lecteur_integre(p['content'], p['nom'])
 
     with c2:
-        if data.get('marchandises'): st.table(pd.DataFrame(data['marchandises']))
+        if data['marchandises']: st.table(pd.DataFrame(data['marchandises']))
 
     with c3:
-        m = st.radio("Métier", ["Marbre", "Céramique"], horizontal=True, key="cons_m")
-        key = "marbre" if m == "Marbre" else "ceram"
-        if data.get(key): st.table(pd.DataFrame(data[key]))
+        m_c = st.radio("Métier", ["Marbre", "Céramique"], horizontal=True, key="c_m")
+        k = "marbre" if m_c == "Marbre" else "ceram"
+        if data[k]: st.table(pd.DataFrame(data[k]))
 
     with c4:
-        for s in data.get('salaries', []):
-            with st.expander(f"📁 Document : {s['nom']}"):
-                afficher_fichier(s['content'], s['nom'])
+        for s in data['salaries']:
+            with st.expander(f"👁️ VOIR : {s['nom']}", expanded=False):
+                lecteur_integre(s['content'], s['nom'])
