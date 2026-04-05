@@ -86,16 +86,17 @@ def creer_pdf_section(titre, data_list, type_rapport):
                 pdf.set_font('Arial', 'B', 11)
                 pdf.cell(0, 10, f"Intervenant : {inter}", ln=True)
                 cols = ['DATE', 'TYPE', 'LOT/REF', 'LIEU/APPT', 'M2']
-                w = [25, 35, 35, 65, 30]
+                w = [25, 45, 25, 65, 30]
                 for i, c in enumerate(cols): pdf.cell(w[i], 8, c, 1, 0, 'C', True)
                 pdf.ln()
                 pdf.set_font('Arial', '', 8)
                 for _, r in group.iterrows():
                     pdf.cell(25, 7, str(r.get('Date', '-')), 1)
-                    pdf.cell(35, 7, str(r.get('Type', '-')), 1)
-                    pdf.cell(35, 7, str(r.get('Référence', '-')) if r.get('Référence') else '-', 1)
+                    pdf.cell(45, 7, str(r.get('Type', '-'))[:25], 1)
+                    pdf.cell(25, 7, str(r.get('Référence', '-')) if r.get('Référence') else '-', 1)
                     pdf.cell(65, 7, str(r.get('Lieu', '-'))[:45], 1)
-                    pdf.cell(30, 7, str(r.get('Surface', '-')), 1, 1)
+                    surface_val = r.get('Surface')
+                    pdf.cell(30, 7, f"{surface_val} m2" if surface_val else "-", 1, 1)
                 pdf.ln(5)
 
     else:
@@ -178,29 +179,39 @@ elif mode == "📝 SAISIE":
         if spec == "Marbre":
             interv = st.selectbox("Intervenant", ["FETTAH", "Simo"])
             type_m = st.selectbox("Type", ["Gris Bold", "White Sand", "Blanc Carrara"])
-            fourn, ref_v, appt, surf, fini = None, None, None, 0.0, "Poli"
+            
+            fourn, ref_v, appt, surf, fini, sous_type_bc = None, None, None, None, None, None
+            
             if type_m == "Blanc Carrara":
-                c1, c2 = st.columns(2)
-                # Ajout de MARMI BIANCO ici
-                fourn = c1.selectbox("Fournisseur Marbre", ["Graziani", "Caro Colombi", "Lorenzoni", "MARMI BIANCO"])
-                ref_v = c2.text_input("Référence (Lot/Bloc)")
+                # --- MODIFICATION BLANC CARRARA ---
+                sous_type_bc = st.selectbox("Élément Blanc Carrara", ["Dallage", "Seuil", "Niche"])
                 appt = st.text_input("N° Appartement")
-                surf = st.number_input("Surface (m²)", min_value=0.0)
-                fini = st.selectbox("Finition", ["Poli", "Adouci", "Brut"])
+                
+                if sous_type_bc == "Dallage":
+                    c1, c2 = st.columns(2)
+                    fourn = c1.selectbox("Fournisseur Marbre", ["Graziani", "Caro Colombi", "Lorenzoni", "MARMI BIANCO"])
+                    ref_v = c2.text_input("Référence (Lot/Bloc)")
+                    surf = st.number_input("Surface (m²)", min_value=0.0)
+                    fini = st.selectbox("Finition", ["Poli", "Adouci", "Brut"])
+            
             imm = st.text_input("Immeuble")
-            # Ajout du 5ème étage ici
             etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème", "5ème"])
             p_m = st.file_uploader("Photo de la pose")
+            
             if st.button("Enregistrer Marbre"):
                 lieu = f"Imm {imm} - {etage}"
                 if appt: lieu += f" - Appt {appt}"
-                data['marbre'].append({"Nom": interv, "Type": type_m, "Fournisseur": fourn, "Référence": ref_v, "Lieu": lieu, "Surface": surf, "Finition": fini, "Date": pd.Timestamp.now().strftime("%d/%m"), "photo": p_m.getvalue() if p_m else None})
+                
+                # Formatage du nom pour le rapport
+                type_final = f"Blanc Carrara - {sous_type_bc}" if type_m == "Blanc Carrara" else type_m
+                
+                data['marbre'].append({"Nom": interv, "Type": type_final, "Fournisseur": fourn, "Référence": ref_v, "Lieu": lieu, "Surface": surf, "Finition": fini, "Date": pd.Timestamp.now().strftime("%d/%m"), "photo": p_m.getvalue() if p_m else None})
                 sauvegarder_donnees(); st.success("Saisie Marbre OK")
         
         elif spec == "Céramique":
-            z = st.selectbox("Zone", ["SDB", "Chambre", "Terrasse"])
+            # --- MODIFICATION CÉRAMIQUE ---
+            z = st.selectbox("Zone", ["SDB", "Chambre", "Terrasse", "Terrasse de l'immeuble"])
             im = st.text_input("Immeuble")
-            # Ajout du 5ème étage ici
             et = st.selectbox("Etage", ["RDC","1","2","3","4","5"])
             p_c = st.file_uploader("Photo Céramique")
             if st.button("Enregistrer Céramique"):
