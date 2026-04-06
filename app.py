@@ -99,9 +99,37 @@ def creer_pdf_section(titre, data_list, type_rapport):
                     pdf.cell(30, 7, f"{surface_val} m2" if surface_val else "-", 1, 1)
                 pdf.ln(5)
 
-    else:
+    elif type_rapport in ["elec", "plomb"]:
+        # Tableau spécifique pour Elec et Plomb avec Quantité et Total
         pdf.cell(30, 10, 'DATE', 1, 0, 'C', True)
         pdf.cell(50, 10, 'PRODUIT', 1, 0, 'C', True)
+        pdf.cell(20, 10, 'QTE', 1, 0, 'C', True)
+        pdf.cell(90, 10, 'DETAILS / LIEU', 1, 1, 'C', True)
+        pdf.set_font('Arial', '', 9)
+        
+        total_qte = 0
+        for r in data_list:
+            q = r.get('Qté', 0)
+            try:
+                total_qte += int(q)
+            except:
+                pass
+                
+            pdf.cell(30, 8, str(r.get('Date', '-')), 1)
+            pdf.cell(50, 8, str(r.get('Produit', r.get('Type', '-')))[:25], 1)
+            pdf.cell(20, 8, str(q), 1, 0, 'C')
+            pdf.cell(90, 8, str(r.get('Lieu', r.get('Détail', '-')))[:45], 1, 1)
+            
+        # Ligne de Total
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(80, 10, 'TOTAL DES QUANTITES :', 1, 0, 'R', True)
+        pdf.cell(20, 10, str(total_qte), 1, 0, 'C', True)
+        pdf.cell(90, 10, '', 1, 1, 'C', True)
+
+    else:
+        # Tableau par défaut (Céramique)
+        pdf.cell(30, 10, 'DATE', 1, 0, 'C', True)
+        pdf.cell(50, 10, 'PRODUIT / ZONE', 1, 0, 'C', True)
         pdf.cell(110, 10, 'DETAILS / LIEU', 1, 1, 'C', True)
         pdf.set_font('Arial', '', 9)
         for r in data_list:
@@ -183,7 +211,6 @@ elif mode == "📝 SAISIE":
             fourn, ref_v, appt, surf, fini, sous_type_bc = None, None, None, None, None, None
             
             if type_m == "Blanc Carrara":
-                # --- MODIFICATION BLANC CARRARA ---
                 sous_type_bc = st.selectbox("Élément Blanc Carrara", ["Dallage", "Seuil", "Niche"])
                 appt = st.text_input("N° Appartement")
                 
@@ -202,14 +229,12 @@ elif mode == "📝 SAISIE":
                 lieu = f"Imm {imm} - {etage}"
                 if appt: lieu += f" - Appt {appt}"
                 
-                # Formatage du nom pour le rapport
                 type_final = f"Blanc Carrara - {sous_type_bc}" if type_m == "Blanc Carrara" else type_m
                 
                 data['marbre'].append({"Nom": interv, "Type": type_final, "Fournisseur": fourn, "Référence": ref_v, "Lieu": lieu, "Surface": surf, "Finition": fini, "Date": pd.Timestamp.now().strftime("%d/%m"), "photo": p_m.getvalue() if p_m else None})
                 sauvegarder_donnees(); st.success("Saisie Marbre OK")
         
         elif spec == "Céramique":
-            # --- MODIFICATION CÉRAMIQUE ---
             z = st.selectbox("Zone", ["SDB", "Chambre", "Terrasse", "Terrasse de l'immeuble"])
             im = st.text_input("Immeuble")
             et = st.selectbox("Etage", ["RDC","1","2","3","4","5"])
@@ -218,7 +243,7 @@ elif mode == "📝 SAISIE":
                 data['ceram'].append({"Type":z, "Lieu":f"Imm {im} - {et}", "Date":pd.Timestamp.now().strftime("%d/%m"), "photo":p_c.getvalue() if p_c else None})
                 sauvegarder_donnees(); st.success("Céramique OK")
         
-        else: # Électricité / Plomberie avec sélection optimisée
+        else: # Électricité / Plomberie
             produits_dispo = cfg["produits_elec"] if spec == "Électricité" else cfg["produits_plomb"]
             
             p_sel = st.selectbox("Sélectionner le produit", produits_dispo)
