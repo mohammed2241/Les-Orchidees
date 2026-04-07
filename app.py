@@ -178,4 +178,154 @@ if mode == "⚙️ CATALOGUE":
 #                MODE SAISIE
 # ==========================================
 elif mode == "📝 SAISIE":
-    tranche = st
+    tranche = st.sidebar.selectbox("TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
+    data = st.session_state.db[tranche]
+    
+    tabs = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVI", "📂 DOCUMENTS"])
+    
+    with tabs[0]:
+        up = st.file_uploader("Upload Plan", type=['pdf','jpg','png','jpeg'])
+        if st.button("Enregistrer Plan") and up:
+            data['plans'].append({"nom": up.name, "content": up.getvalue(), "type": up.type})
+            sauvegarder_donnees(); st.success("Plan enregistré !")
+            
+    with tabs[1]:
+        f = st.selectbox("Fournisseur", cfg["fournisseurs"])
+        d = st.text_area("Désignation complète de la marchandise")
+        p_bl = st.file_uploader("Photo du Bon de Livraison", key="bl_saisie")
+        if st.button("Valider la Réception"):
+            data['marchandises'].append({"Fournisseur": f, "Désignation": d, "Date": pd.Timestamp.now().strftime("%d/%m/%Y"), "photo_bl": p_bl.getvalue() if p_bl else None})
+            sauvegarder_donnees(); st.success("Marchandise enregistrée dans le journal !")
+
+    with tabs[2]:
+        spec = st.radio("Métier", ["Électricité", "Plomberie", "Marbre", "Céramique"], horizontal=True)
+        if spec == "Marbre":
+            interv = st.selectbox("Intervenant", ["FETTAH", "Simo"])
+            type_m = st.selectbox("Type", ["Gris Bold", "White Sand", "Blanc Carrara"])
+            
+            fourn, ref_v, surf, fini, sous_type_bc, appt = None, None, None, None, None, None
+            
+            if type_m == "Blanc Carrara":
+                sous_type_bc = st.selectbox("Élément Blanc Carrara", ["Dallage", "Seuil", "Niche", "Les douches"])
+                
+                if sous_type_bc == "Dallage":
+                    appt = st.text_input("N° Appartement") # <-- RESTAURÉ ICI !
+                    c1, c2 = st.columns(2)
+                    fourn = c1.selectbox("Fournisseur Marbre", ["Graziani", "Caro Colombi", "Lorenzoni", "MARMI BIANCO"])
+                    ref_v = c2.text_input("Référence (Lot/Bloc)")
+                    surf = st.number_input("Surface (m²)", min_value=0.0)
+                    fini = st.selectbox("Finition", ["Poli", "Adouci", "Brut"])
+            
+            imm = st.text_input("Immeuble")
+            etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème", "5ème"])
+            p_m = st.file_uploader("Photo de la pose")
+            
+            if st.button("Enregistrer Marbre"):
+                lieu = f"Imm {imm} - {etage}"
+                if appt:
+                    lieu += f" - Appt {appt}" # <-- AJOUTÉ DANS LE LIEU FINAL
+                
+                type_final = f"Blanc Carrara - {sous_type_bc}" if type_m == "Blanc Carrara" else type_m
+                
+                data['marbre'].append({"Nom": interv, "Type": type_final, "Fournisseur": fourn, "Référence": ref_v, "Lieu": lieu, "Surface": surf, "Finition": fini, "Date": pd.Timestamp.now().strftime("%d/%m"), "photo": p_m.getvalue() if p_m else None})
+                sauvegarder_donnees(); st.success("Saisie Marbre OK")
+        
+        elif spec == "Céramique":
+            z = st.selectbox("Zone", ["SDB", "Cuisine", "Chambre", "Terrasse", "Terrasse de l'immeuble"])
+            im = st.text_input("Immeuble")
+            
+            if z != "Terrasse de l'immeuble":
+                et = st.selectbox("Etage", ["RDC","1","2","3","4","5"])
+            else:
+                et = None
+                
+            p_c = st.file_uploader("Photo Céramique")
+            if st.button("Enregistrer Céramique"):
+                lieu_c = f"Imm {im} - {et}" if et else f"Imm {im}"
+                data['ceram'].append({"Type":z, "Lieu":lieu_c, "Date":pd.Timestamp.now().strftime("%d/%m"), "photo":p_c.getvalue() if p_c else None})
+                sauvegarder_donnees(); st.success("Céramique OK")
+        
+        else: # Électricité / Plomberie
+            produits_dispo = cfg["produits_elec"] if spec == "Électricité" else cfg["produits_plomb"]
+            
+            p_sel = st.selectbox("Sélectionner le produit", produits_dispo)
+            c1, c2 = st.columns(2)
+            q = c1.number_input("Qté", min_value=1)
+            dt = c2.text_input("Détails / Lieu d'installation (ex: Imm 1 - 5ème)")
+            p_s = st.file_uploader(f"Photo (optionnel)", key="photo_ep")
+            
+            if st.button(f"Valider {spec}"):
+                k = "elec" if spec == "Électricité" else "plomb"
+                data[k].append({"Produit": p_sel, "Qté": q, "Détail": dt, "Date": pd.Timestamp.now().strftime("%d/%m"), "photo": p_s.getvalue() if p_s else None})
+                sauvegarder_donnees(); st.success("Enregistré avec succès !")
+
+    with tabs[3]:
+        up_doc = st.file_uploader("Fichier Document", type=['pdf', 'xlsx', 'jpg', 'png'])
+        titre_doc = st.text_input("Titre du document")
+        if st.button("Ajouter Document") and up_doc:
+            data['documents'].append({"nom": titre_doc if titre_doc else up_doc.name, "content": up_doc.getvalue(), "type": up_doc.type, "filename": up_doc.name})
+            sauvegarder_donnees(); st.success("Document ajouté !")
+
+# ==========================================
+#           MODE CONSULTATION
+# ==========================================
+elif mode == "🔍 CONSULTATION":
+    tranche = st.sidebar.selectbox("TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
+    data = st.session_state.db[tranche]
+    
+    st.header(f"🔍 Consultation - {tranche}")
+    ctabs = st.tabs(["📄 PLANS", "📦 MARCHANDISES", "🛠️ SUIVI", "📂 DOCUMENTS"])
+
+    with ctabs[0]:
+        for i, p in enumerate(data['plans']):
+            with st.expander(f"📄 {p['nom']}"):
+                st.download_button("Ouvrir", data=p['content'], file_name=p['nom'], key=f"dl_p_{i}")
+                if p.get('type','').startswith('image'): st.image(p['content'])
+                if st.checkbox("Confirmer la suppression", key=f"conf_p_{i}"):
+                    if st.button("🗑️ Supprimer", key=f"del_p_{i}"):
+                        data['plans'].pop(i); sauvegarder_donnees(); st.rerun()
+
+    with ctabs[1]:
+        st.download_button("📥 Télécharger Rapport Marchandises (PDF)", data=creer_pdf_section("MARCHANDISES", data['marchandises'], "marchandises"), file_name=f"Marchandises_{tranche}.pdf", key="btn_pdf_march")
+        st.divider()
+        for i, m in enumerate(data['marchandises']):
+            with st.expander(f"📦 {m.get('Fournisseur')} - {m.get('Date')}"):
+                st.write(f"**Désignation :** {m.get('Désignation')}")
+                if m.get('photo_bl'): st.image(m['photo_bl'], width=400, caption="Bon de Livraison")
+                if st.checkbox("Confirmer la suppression", key=f"conf_m_{i}"):
+                    if st.button("🗑️ Supprimer", key=f"del_m_{i}"):
+                        data['marchandises'].pop(i); sauvegarder_donnees(); st.rerun()
+
+    with ctabs[2]:
+        m_sel = st.radio("Filtrer par métier", ["Marbre", "Céramique", "Électricité", "Plomberie"], horizontal=True)
+        k_map = {"Marbre": "marbre", "Céramique": "ceram", "Électricité": "elec", "Plomberie": "plomb"}
+        
+        st.download_button(f"📥 Télécharger Rapport {m_sel} (PDF)", data=creer_pdf_section(m_sel.upper(), data[k_map[m_sel]], k_map[m_sel]), file_name=f"Rapport_{m_sel}_{tranche}.pdf", key="btn_pdf_suivi")
+        st.divider()
+        
+        for i, entry in enumerate(data[k_map[m_sel]]):
+            titre_exp = f"🛠️ {entry.get('Type', entry.get('Produit'))}"
+            if entry.get('Nom'): titre_exp += f" - {entry['Nom']}"
+            titre_exp += f" ({entry.get('Date')})"
+            
+            with st.expander(titre_exp):
+                if entry.get('Qté'): st.write(f"**Quantité :** {entry['Qté']}")
+                if entry.get('photo'): st.image(entry['photo'], width=450)
+                st.write(f"**Lieu/Détail :** {entry.get('Lieu', entry.get('Détail', ''))}")
+                if entry.get('Surface'): st.info(f"Surface: {entry['Surface']} m2 | Finition: {entry.get('Finition')}")
+                if entry.get('Fournisseur'): st.write(f"Provenance: {entry['Fournisseur']} | Réf: {entry.get('Référence')}")
+                
+                if st.checkbox("Confirmer la suppression", key=f"conf_s_{m_sel}_{i}"):
+                    if st.button("🗑️ Supprimer", key=f"del_s_{m_sel}_{i}"):
+                        data[k_map[m_sel]].pop(i); sauvegarder_donnees(); st.rerun()
+
+    with ctabs[3]:
+        for i, d in enumerate(data['documents']):
+            with st.expander(f"📑 {d['nom']}"):
+                st.download_button("Ouvrir", data=d['content'], file_name=d.get('filename', d['nom']), key=f"dl_d_{i}")
+                if d.get('filename', '').lower().endswith('.xlsx'):
+                    try: st.dataframe(pd.read_excel(io.BytesIO(d['content']), engine='openpyxl'), use_container_width=True)
+                    except: pass
+                if st.checkbox("Confirmer la suppression", key=f"conf_d_{i}"):
+                    if st.button("🗑️ Supprimer", key=f"del_d_{i}"):
+                        data['documents'].pop(i); sauvegarder_donnees(); st.rerun()
