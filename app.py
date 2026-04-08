@@ -4,7 +4,6 @@ import gspread
 from google.oauth2.service_account import Credentials
 import datetime
 from fpdf import FPDF
-import io
 
 # --- CONFIGURATION GOOGLE SHEETS ---
 SCOPE = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -40,99 +39,107 @@ def delete_last_row(sheet_name):
             if len(rows) > 1:
                 sheet.delete_rows(len(rows))
                 return True
-            else:
-                st.warning("L'onglet est déjà vide (hors entêtes).")
     except Exception as e:
-        st.error(f"Erreur de suppression : {e}")
+        st.error(f"Erreur : {e}")
     return False
 
-# --- GENERATION PDF ---
-class PDF(FPDF):
-    def header(self):
-        self.set_font('Arial', 'B', 12)
-        self.cell(0, 10, 'RAPPORT TECHNIQUE - LES ORCHIDÉES', 0, 1, 'C')
-        self.ln(5)
-
+# --- GÉNÉRATION PDF ---
 def create_pdf(df, title):
-    pdf = PDF()
+    pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", 'B', 10)
-    pdf.cell(0, 10, f"Catégorie : {title}", 0, 1, 'L')
-    pdf.set_font("Arial", size=8)
+    pdf.set_font("Arial", 'B', 14)
+    pdf.cell(0, 10, f"RAPPORT : {title.upper()}", 0, 1, 'C')
+    pdf.ln(10)
+    pdf.set_font("Arial", size=10)
     
-    # Largeur des colonnes
     col_width = 190 / len(df.columns)
-    
-    # Entêtes
     for col in df.columns:
         pdf.cell(col_width, 10, str(col), border=1)
     pdf.ln()
-    
-    # Données
     for i in range(len(df)):
         for col in df.columns:
             pdf.cell(col_width, 10, str(df.iloc[i][col]), border=1)
         pdf.ln()
-    
     return pdf.output(dest='S').encode('latin-1')
 
+# --- DONNÉES TECHNIQUES (DÉTAILS MÉTIERS) ---
+DEFAUT_FRS = ["INTERCABLE", "SOFA", "PROMELEC", "MG LIGHTING", "KADIR DISTRIBUTION", "SARABO", "SOQOP", "FROIDEL", "NOVACIM", "RE SERVICE", "ATLAS MULTIMATERIEL", "SBBC", "LAFARGE", "SAFI BAINS", "INNOVA WOOD", "SINASTONE", "MEDIAL", "EXPLOMAR", "RIVA", "INTERSIG", "AQUAPLANET", "BEKO MAGHREB", "ISOLBOX", "PLATINOVA", "TAMAGROT", "AOC", "SOCODAM DAVUM", "HYDRAU MAC", "TRACTRAFFIC", "GOOD YEAR BAB DOKALA", "MULTICERAME", "MALL ZALLIJ", "SUPER CERAME", "PETROMIN OILS", "ALSINA", "PERI", "Autre"]
+
+LISTE_ELEC = ["SPOT", "SPOT DOUBLE", "BLOC DE SECOURS", "DISJ", "APPLIQUE", "LED", "SUPPORT SURMOULE", "SUPPORT 3 MODULES", "SUPPORT 4 MODULES", "SUPPORT 6 MODULES", "PRISE 2P+T IP44", "Obturateur", "PRISE 2P+T 45", "Prise TV SAT", "Interr SVV", "Interr V&V", "Pousse à basc", "Inver volets roul", "Video phonique"]
+
+LISTE_PLOMB = ["TOILETTE", "VASQUE 60 CM", "VASQUE 80 CM", "BIDETS", "DOUCHETTE", "POMPE DE DOUCHE", "MIT DCH", "MIT LVB", "MIT BIDET", "CHAUFFE EAU", "EVIER", "MIT EVIER"]
+
 # --- INTERFACE ---
-st.set_page_config(page_title="Portail Manesmane", layout="wide")
+st.set_page_config(page_title="Suivi Manesmane", layout="wide")
+st.title("🏗️ SUIVI TECHNIQUE - LES ORCHIDÉES")
 
-DEFAUT_FRS = ["INTERCABLE", "SOFA", "PROMELEC", "MG LIGHTING", "KADIR DISTRIBUTION", "SARABO", "SOQOP", "FROIDEL", "NOVACIM", "RE SERVICE", "ATLAS MULTIMATERIEL", "SBBC", "LAFARGE", "SAFI BAINS", "INNOVA WOOD", "SINASTONE", "MEDIAL", "EXPLOMAR", "RIVA", "INTERSIG", "AQUAPLANET", "BEKO MAGHREB", "ISOLBOX", "PLATINOVA", "TAMAGROT", "AOC", "SOCODAM DAVUM", "HYDRAU MAC", "TRACTRAFFIC", "GOOD YEAR BAB DOKALA", "MULTICERAME", "MALL ZALLIJ", "SUPER CERAME", "PETROMIN OILS", "ALSINA", "PERI"]
+menu = st.sidebar.radio("NAVIGATION", ["📝 SAISIE", "🔍 CONSULTATION"])
+tranche = st.sidebar.selectbox("TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
 
-st.title("🏗️ PORTAIL TECHNIQUE - LES ORCHIDÉES")
-
-menu = st.sidebar.radio("NAVIGATION", ["📝 SAISIE TERRAIN", "🔍 CONSULTATION"])
-tranche = st.sidebar.selectbox("CHOIX DE LA TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
-
-# ==========================================
-#                MODE SAISIE
-# ==========================================
-if menu == "📝 SAISIE TERRAIN":
-    st.header(f"Nouvelle Saisie - {tranche}")
+if menu == "📝 SAISIE":
     tabs = st.tabs(["📦 Marchandises", "⚡ Électricité", "🚰 Plomberie", "💎 Marbre", "🧱 Céramique"])
 
-    sections = [
-        ("Marchandises", tabs[0], ["Fournisseur", "Désignation"]),
-        ("Electricite", tabs[1], ["Produit", "Quantité", "Lieu"]),
-        ("Plomberie", tabs[2], ["Produit", "Quantité", "Lieu"]),
-        ("Marbre", tabs[3], ["Intervenant", "Type", "Lieu", "Surface"]),
-        ("Ceramique", tabs[4], ["Zone", "Lieu"])
-    ]
+    with tabs[0]: # MARCHANDISES
+        with st.form("form_march"):
+            f = st.selectbox("Fournisseur", DEFAUT_FRS)
+            d = st.text_area("Désignation du matériel")
+            c1, c2 = st.columns(2)
+            if c1.form_submit_button("✅ Enregistrer"):
+                if add_to_sheet("Marchandises", [datetime.date.today().strftime("%d/%m/%Y"), tranche, f, d]):
+                    st.success("Enregistré !")
+            if c2.form_submit_button("🗑️ Annuler dernier"):
+                if delete_last_row("Marchandises"): st.warning("Supprimé")
 
-    for name, tab, labels in sections:
-        with tab:
-            with st.form(key=f"form_{name}"):
-                if name == "Marchandises":
-                    f = st.selectbox("Fournisseur", DEFAUT_FRS)
-                    d = st.text_area("Désignation")
-                    row = [datetime.datetime.now().strftime("%d/%m/%Y"), tranche, f, d]
-                elif name == "Marbre":
-                    i = st.selectbox("Intervenant", ["FETTAH", "Simo"])
-                    t = st.selectbox("Type", ["Gris Bold", "White Sand", "Blanc Carrara"])
-                    l = st.text_input("Immeuble/Étage")
-                    s = st.number_input("Surface (m²)", min_value=0.0)
-                    row = [datetime.datetime.now().strftime("%d/%m/%Y"), tranche, i, t, l, s]
-                else:
-                    c1, c2 = st.columns(2)
-                    v1 = c1.text_input(labels[0])
-                    v2 = c2.number_input(labels[1], min_value=1) if "Quantité" in labels[1] else c2.text_input(labels[1])
-                    v3 = st.text_input(labels[2]) if len(labels)>2 else ""
-                    row = [datetime.datetime.now().strftime("%d/%m/%Y"), tranche, v1, v2, v3] if len(labels)>2 else [datetime.datetime.now().strftime("%d/%m/%Y"), tranche, v1, v2]
+    with tabs[1]: # ÉLECTRICITÉ
+        with st.form("form_elec"):
+            p = st.selectbox("Produit", LISTE_ELEC)
+            q = st.number_input("Quantité", min_value=1)
+            loc = st.text_input("Immeuble / Appt")
+            c1, c2 = st.columns(2)
+            if c1.form_submit_button("✅ Valider Pose"):
+                if add_to_sheet("Electricite", [datetime.date.today().strftime("%d/%m/%Y"), tranche, p, q, loc]):
+                    st.success("Enregistré !")
+            if c2.form_submit_button("🗑️ Annuler"):
+                if delete_last_row("Electricite"): st.warning("Supprimé")
 
-                col_btn1, col_btn2 = st.columns([1, 4])
-                if col_btn1.form_submit_button("✅ Valider"):
-                    if add_to_sheet(name, row): st.success(f"Enregistré dans {name}")
-                
-                if col_btn2.form_submit_button("🗑️ Supprimer dernière ligne"):
-                    if delete_last_row(name): st.warning(f"Dernière ligne de {name} supprimée")
+    with tabs[2]: # PLOMBERIE
+        with st.form("form_plomb"):
+            p = st.selectbox("Produit", LISTE_PLOMB)
+            q = st.number_input("Quantité", min_value=1)
+            loc = st.text_input("Immeuble / Appt / SDB")
+            c1, c2 = st.columns(2)
+            if c1.form_submit_button("✅ Valider Pose"):
+                if add_to_sheet("Plomberie", [datetime.date.today().strftime("%d/%m/%Y"), tranche, p, q, loc]):
+                    st.success("Enregistré !")
+            if c2.form_submit_button("🗑️ Annuler"):
+                if delete_last_row("Plomberie"): st.warning("Supprimé")
 
-# ==========================================
-#           MODE CONSULTATION
-# ==========================================
-else:
-    st.header(f"Consultation & Rapports - {tranche}")
+    with tabs[3]: # MARBRE
+        with st.form("form_marbre"):
+            interv = st.selectbox("Marbrier", ["FETTAH", "Simo"])
+            type_m = st.selectbox("Type", ["Gris Bold", "White Sand", "Blanc Carrara"])
+            loc = st.text_input("Immeuble / Étage")
+            surf = st.number_input("Surface (m²)", min_value=0.0)
+            c1, c2 = st.columns(2)
+            if c1.form_submit_button("✅ Valider Marbre"):
+                if add_to_sheet("Marbre", [datetime.date.today().strftime("%d/%m/%Y"), tranche, interv, type_m, loc, surf]):
+                    st.success("Enregistré !")
+            if c2.form_submit_button("🗑️ Annuler"):
+                if delete_last_row("Marbre"): st.warning("Supprimé")
+
+    with tabs[4]: # CÉRAMIQUE
+        with st.form("form_ceram"):
+            zone = st.selectbox("Zone", ["SDB", "Cuisine", "Chambre", "Terrasse", "Salon"])
+            loc = st.text_input("Immeuble / Étage")
+            c1, c2 = st.columns(2)
+            if c1.form_submit_button("✅ Valider Céram"):
+                if add_to_sheet("Ceramique", [datetime.date.today().strftime("%d/%m/%Y"), tranche, zone, loc]):
+                    st.success("Enregistré !")
+            if c2.form_submit_button("🗑️ Annuler"):
+                if delete_last_row("Ceramique"): st.warning("Supprimé")
+
+else: # CONSULTATION
+    st.header(f"Suivi {tranche}")
     try:
         client = get_gsheet_client()
         sh = client.open("BDD_Chantier_Manesmane")
@@ -145,13 +152,10 @@ else:
                 data = sh.worksheet(onglets[i]).get_all_values()
                 if len(data) > 1:
                     df = pd.DataFrame(data[1:], columns=cols[i])
-                    df_filtered = df[df["Tranche"] == tranche]
-                    st.dataframe(df_filtered, use_container_width=True, hide_index=True)
-                    
-                    if not df_filtered.empty:
-                        pdf_data = create_pdf(df_filtered, onglets[i])
-                        st.download_button(label="📥 Télécharger Rapport PDF", data=pdf_data, file_name=f"Rapport_{onglets[i]}_{tranche}.pdf", mime="application/pdf")
-                else:
-                    st.info("Aucune donnée.")
+                    df_f = df[df["Tranche"] == tranche]
+                    st.dataframe(df_f, use_container_width=True, hide_index=True)
+                    if not df_f.empty:
+                        pdf = create_pdf(df_f, onglets[i])
+                        st.download_button(f"📥 PDF {onglets[i]}", data=pdf, file_name=f"{onglets[i]}.pdf")
     except Exception as e:
         st.error(f"Erreur : {e}")
