@@ -49,8 +49,42 @@ def sauvegarder_donnees():
     with open(DB_FILE, "wb") as f:
         pickle.dump(st.session_state.db, f)
 
+def charger_depuis_sheets_au_demarrage():
+    """
+    Appelée une seule fois au démarrage si les données locales sont vides.
+    Recharge toutes les données depuis Google Sheets → pickle local.
+    """
+    client = get_gsheet_client()
+    if client is None:
+        return
+    spreadsheet = get_spreadsheet(client)
+    if spreadsheet is None:
+        return
+    for tranche in ["Tranche 3", "Tranche 4", "Tranche 5"]:
+        for section, headers in HEADERS.items():
+            tab_name = SHEET_TAB_MAP[tranche][section]
+            try:
+                ws = spreadsheet.worksheet(tab_name)
+            except Exception:
+                continue
+            records = ws.get_all_records()
+            st.session_state.db[tranche][section] = list(records)
+    sauvegarder_donnees()
+
+# --- DÉMARRAGE : recharger depuis Sheets si données locales absentes ---
 if 'db' not in st.session_state:
     st.session_state.db = charger_donnees()
+
+if 'sheets_loaded' not in st.session_state:
+    # Vérifier si toutes les données locales sont vides
+    toutes_vides = all(
+        len(st.session_state.db[t][s]) == 0
+        for t in ["Tranche 3", "Tranche 4", "Tranche 5"]
+        for s in ["marchandises", "elec", "plomb", "marbre", "ceram"]
+    )
+    if toutes_vides:
+        charger_depuis_sheets_au_demarrage()
+    st.session_state.sheets_loaded = True
 
 cfg = st.session_state.db["config"]
 
