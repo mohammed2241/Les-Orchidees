@@ -63,30 +63,22 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-# Noms des onglets dans le Google Sheet (un par tranche + section)
-# Structure : "T3 Marchandises", "T3 Elec", "T3 Plomb", "T3 Marbre", "T3 Ceram", etc.
 SHEET_TAB_MAP = {
     "Tranche 3": {"marchandises": "T3 Marchandises", "elec": "T3 Elec", "plomb": "T3 Plomb", "marbre": "T3 Marbre", "ceram": "T3 Ceram"},
     "Tranche 4": {"marchandises": "T4 Marchandises", "elec": "T4 Elec", "plomb": "T4 Plomb", "marbre": "T4 Marbre", "ceram": "T4 Ceram"},
     "Tranche 5": {"marchandises": "T5 Marchandises", "elec": "T5 Elec", "plomb": "T5 Plomb", "marbre": "T5 Marbre", "ceram": "T5 Ceram"},
 }
 
-# En-têtes par type de données
 HEADERS = {
     "marchandises": ["Date", "Fournisseur", "Désignation"],
     "elec":         ["Date", "Produit", "Qté", "Lieu"],
     "plomb":        ["Date", "Produit", "Qté", "Lieu"],
-    "marbre":       ["Date", "Nom", "Type", "Fournisseur", "Référence", "Lieu", "Surface", "Finition"],
-    "ceram":        ["Date", "Type", "Lieu"],
+    "marbre":       ["Date", "Nom", "Type", "Fournisseur", "Référence", "Lieu", "Surface"],
+    "ceram":        ["Date", "Type", "Immeuble"],
 }
 
 @st.cache_resource(show_spinner=False)
 def get_gsheet_client():
-    """
-    Initialise le client gspread depuis les secrets Streamlit.
-    Dans Streamlit Cloud, configurez un secret nommé 'gcp_service_account'
-    contenant le JSON complet du compte de service.
-    """
     if not GSPREAD_AVAILABLE:
         return None
     try:
@@ -94,11 +86,10 @@ def get_gsheet_client():
         creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
         client = gspread.authorize(creds)
         return client
-    except Exception as e:
+    except Exception:
         return None
 
 def get_spreadsheet(client):
-    """Ouvre le Google Sheet via son nom ou son URL stocké dans les secrets."""
     try:
         sheet_id = st.secrets["google_sheet"]["spreadsheet_id"]
         return client.open_by_key(sheet_id)
@@ -106,7 +97,6 @@ def get_spreadsheet(client):
         return None
 
 def get_or_create_worksheet(spreadsheet, tab_name, headers):
-    """Retourne l'onglet existant ou le crée avec les en-têtes."""
     try:
         ws = spreadsheet.worksheet(tab_name)
     except gspread.WorksheetNotFound:
@@ -115,23 +105,16 @@ def get_or_create_worksheet(spreadsheet, tab_name, headers):
     return ws
 
 def synchro_vers_sheets(tranche, section, nouvelle_ligne):
-    """
-    Ajoute une seule ligne dans l'onglet Google Sheet correspondant.
-    C'est la méthode rapide appelée à chaque saisie.
-    """
     client = get_gsheet_client()
     if client is None:
         return False
     spreadsheet = get_spreadsheet(client)
     if spreadsheet is None:
         return False
-
     tab_name = SHEET_TAB_MAP[tranche][section]
     headers  = HEADERS[section]
-
     try:
         ws = get_or_create_worksheet(spreadsheet, tab_name, headers)
-        # Construire la ligne dans l'ordre des en-têtes (ignorer les photos)
         row = [str(nouvelle_ligne.get(col, "")) for col in headers]
         ws.append_row(row, value_input_option="USER_ENTERED")
         return True
@@ -140,10 +123,6 @@ def synchro_vers_sheets(tranche, section, nouvelle_ligne):
         return False
 
 def exporter_tout_vers_sheets():
-    """
-    Exporte TOUTES les données locales vers Google Sheets (écrase le contenu).
-    À utiliser pour une resynchronisation complète.
-    """
     client = get_gsheet_client()
     if client is None:
         st.error("❌ Impossible de se connecter à Google Sheets. Vérifiez vos secrets.")
@@ -152,13 +131,11 @@ def exporter_tout_vers_sheets():
     if spreadsheet is None:
         st.error("❌ Google Sheet introuvable. Vérifiez le 'spreadsheet_id' dans les secrets.")
         return
-
     total = 0
     for tranche in ["Tranche 3", "Tranche 4", "Tranche 5"]:
         for section, headers in HEADERS.items():
             tab_name = SHEET_TAB_MAP[tranche][section]
             ws = get_or_create_worksheet(spreadsheet, tab_name, headers)
-            # Effacer et réécrire
             ws.clear()
             ws.append_row(headers)
             rows = st.session_state.db[tranche].get(section, [])
@@ -168,11 +145,34 @@ def exporter_tout_vers_sheets():
                 total += 1
     st.success(f"✅ Export complet : {total} lignes envoyées vers Google Sheets.")
 
+def supprimer_ligne_sheet(tranche, section, entry):
+    """
+    Supprime la ligne correspondant à 'entry' dans l'onglet Google Sheets.
+    La correspondance se fait sur toutes les colonnes texte (sans les photos).
+    """
+    client = get_gsheet_client()
+    if client is None:
+        return False
+    spreadsheet = get_spreadsheet(client)
+    if spreadsheet is None:
+        return False
+    tab_name = SHEET_TAB_MAP[tranche][section]
+    headers  = HEADERS[section]
+    try:
+        ws = get_or_create_worksheet(spreadsheet, tab_name, headers)
+        # Construire la ligne à chercher
+        row_to_find = [str(entry.get(col, "")) for col in headers]
+        all_rows = ws.get_all_values()  # incluant l'en-tête en ligne 1
+        for idx, row in enumerate(all_rows):
+            if row == row_to_find:
+                ws.delete_rows(idx + 1)  # gspread : lignes indexées à partir de 1
+                return True
+        return False
+    except Exception as e:
+        st.warning(f"⚠️ Suppression Google Sheets échouée : {e}")
+        return False
+
 def importer_depuis_sheets():
-    """
-    Importe les données depuis Google Sheets et FUSIONNE avec les données locales
-    (dédoublonnage sur Date + champ principal).
-    """
     client = get_gsheet_client()
     if client is None:
         st.error("❌ Impossible de se connecter à Google Sheets.")
@@ -181,7 +181,6 @@ def importer_depuis_sheets():
     if spreadsheet is None:
         st.error("❌ Google Sheet introuvable.")
         return
-
     total_importe = 0
     for tranche in ["Tranche 3", "Tranche 4", "Tranche 5"]:
         for section, headers in HEADERS.items():
@@ -190,24 +189,19 @@ def importer_depuis_sheets():
                 ws = spreadsheet.worksheet(tab_name)
             except gspread.WorksheetNotFound:
                 continue
-
-            records = ws.get_all_records()  # liste de dicts avec les en-têtes comme clés
+            records = ws.get_all_records()
             local_list = st.session_state.db[tranche].get(section, [])
 
-            # Créer un set de clés existantes pour dédoublonnage
             def cle(entry):
                 return (entry.get("Date", ""), entry.get("Fournisseur", entry.get("Produit", entry.get("Nom", entry.get("Type", "")))))
 
             existing_keys = {cle(e) for e in local_list}
-
             for rec in records:
                 if cle(rec) not in existing_keys:
                     local_list.append(rec)
                     existing_keys.add(cle(rec))
                     total_importe += 1
-
             st.session_state.db[tranche][section] = local_list
-
     sauvegarder_donnees()
     st.success(f"✅ Import terminé : {total_importe} nouvelles entrées fusionnées.")
 
@@ -256,12 +250,10 @@ def creer_pdf_section(titre, data_list, type_rapport):
 # --- INTERFACE PRINCIPALE ---
 st.title("🏗️ LES ORCHIDÉES MANESMANE")
 
-# --- SIDEBAR ---
 mode    = st.sidebar.radio("MENU", ["📝 SAISIE", "🔍 CONSULTATION", "⚙️ CATALOGUE", "☁️ GOOGLE SHEETS"])
 tranche = st.sidebar.selectbox("TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
 data    = st.session_state.db[tranche]
 
-# Indicateur de connexion Google Sheets dans la sidebar
 gs_client = get_gsheet_client()
 if gs_client:
     st.sidebar.success("☁️ Google Sheets : Connecté")
@@ -273,8 +265,8 @@ if mode == "📝 SAISIE":
     tabs = st.tabs(["📦 MARCHANDISES", "🛠️ SUIVI CHANTIER"])
 
     with tabs[0]:
-        f   = st.selectbox("Fournisseur", cfg["fournisseurs"])
-        d   = st.text_area("Désignation complète")
+        f    = st.selectbox("Fournisseur", cfg["fournisseurs"])
+        d    = st.text_area("Désignation complète")
         p_bl = st.file_uploader("Photo du Bon de Livraison", type=['jpg','png','jpeg'])
         if st.button("Valider Réception"):
             nouvelle = {
@@ -294,44 +286,91 @@ if mode == "📝 SAISIE":
             interv = st.selectbox("Intervenant", ["FETTAH", "Simo"])
             type_m = st.selectbox("Type Marbre", ["Gris Bold", "White Sand", "Blanc Carrara"])
 
-            fourn, ref_v, surf, fini, sous_type_bc, appt = None, None, 0.0, None, None, ""
+            fourn, ref_v, surf, sous_type_bc, appt = None, None, 0.0, None, ""
 
-            if type_m == "Blanc Carrara":
+            # ---- WHITE SAND : étage → Magasin ou Entrée ----
+            if type_m == "White Sand":
+                imm      = st.text_input("Immeuble")
+                emplacement = st.selectbox("Emplacement", ["Magasin", "Entrée"])
+                p_m      = st.file_uploader("Photo de la pose")
+                if st.button("Enregistrer Marbre"):
+                    lieu_final = f"Imm {imm} - {emplacement}"
+                    nouvelle = {
+                        "Nom": interv, "Type": type_m, "Fournisseur": None,
+                        "Référence": None, "Lieu": lieu_final, "Surface": 0,
+                        "Date": datetime.date.today().strftime("%d/%m"),
+                        "photo": p_m.getvalue() if p_m else None
+                    }
+                    data['marbre'].append(nouvelle)
+                    sauvegarder_donnees()
+                    synchro_vers_sheets(tranche, "marbre", nouvelle)
+                    st.success("Saisie Marbre Validée")
+
+            # ---- BLANC CARRARA ----
+            elif type_m == "Blanc Carrara":
                 sous_type_bc = st.selectbox("Élément Blanc Carrara", ["Dallage", "Seuil", "Niche", "Les douches"])
+
                 if sous_type_bc == "Dallage":
-                    appt = st.text_input("N° Appartement")
+                    appt  = st.text_input("N° Appartement")
                     c1, c2 = st.columns(2)
-                    fourn  = c1.selectbox("Fournisseur Marbre", ["Graziani", "Caro Colombi", "Lorenzoni", "MARMI BIANCO"])
-                    ref_v  = c2.text_input("Référence (Lot/Bloc)")
-                    surf   = st.number_input("Surface (m²)", min_value=0.0)
-                    fini   = st.selectbox("Finition", ["Poli", "Adouci", "Brut"])
+                    fourn = c1.selectbox("Fournisseur Marbre", ["Graziani", "Caro Colombi", "Lorenzoni", "MARMI BIANCO"])
+                    ref_v = c2.text_input("Référence (Lot/Bloc)")
+                    surf  = st.number_input("Surface (m²)", min_value=0.0)
+                    # ✅ Finition supprimée pour Dallage
 
-            imm   = st.text_input("Immeuble")
-            etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème", "5ème"])
-            p_m   = st.file_uploader("Photo de la pose")
+                imm   = st.text_input("Immeuble")
+                etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème", "5ème"])
+                p_m   = st.file_uploader("Photo de la pose")
 
-            if st.button("Enregistrer Marbre"):
-                lieu_final = f"Imm {imm} - {etage}" + (f" - Appt {appt}" if appt else "")
-                type_final = f"Blanc Carrara ({sous_type_bc})" if sous_type_bc else type_m
-                nouvelle = {
-                    "Nom": interv, "Type": type_final, "Fournisseur": fourn,
-                    "Référence": ref_v, "Lieu": lieu_final, "Surface": surf,
-                    "Finition": fini, "Date": datetime.date.today().strftime("%d/%m"),
-                    "photo": p_m.getvalue() if p_m else None
-                }
-                data['marbre'].append(nouvelle)
-                sauvegarder_donnees()
-                synchro_vers_sheets(tranche, "marbre", nouvelle)
-                st.success("Saisie Marbre Validée")
+                if st.button("Enregistrer Marbre"):
+                    lieu_final = f"Imm {imm} - {etage}" + (f" - Appt {appt}" if appt else "")
+                    type_final = f"Blanc Carrara ({sous_type_bc})"
+                    nouvelle = {
+                        "Nom": interv, "Type": type_final, "Fournisseur": fourn,
+                        "Référence": ref_v, "Lieu": lieu_final, "Surface": surf,
+                        "Date": datetime.date.today().strftime("%d/%m"),
+                        "photo": p_m.getvalue() if p_m else None
+                    }
+                    data['marbre'].append(nouvelle)
+                    sauvegarder_donnees()
+                    synchro_vers_sheets(tranche, "marbre", nouvelle)
+                    st.success("Saisie Marbre Validée")
 
+            # ---- GRIS BOLD (inchangé) ----
+            else:
+                imm   = st.text_input("Immeuble")
+                etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème", "5ème"])
+                p_m   = st.file_uploader("Photo de la pose")
+                if st.button("Enregistrer Marbre"):
+                    lieu_final = f"Imm {imm} - {etage}"
+                    nouvelle = {
+                        "Nom": interv, "Type": type_m, "Fournisseur": None,
+                        "Référence": None, "Lieu": lieu_final, "Surface": 0,
+                        "Date": datetime.date.today().strftime("%d/%m"),
+                        "photo": p_m.getvalue() if p_m else None
+                    }
+                    data['marbre'].append(nouvelle)
+                    sauvegarder_donnees()
+                    synchro_vers_sheets(tranche, "marbre", nouvelle)
+                    st.success("Saisie Marbre Validée")
+
+        # ---- CÉRAMIQUE ----
         elif spec == "Céramique":
-            z   = st.selectbox("Zone", ["SDB", "Cuisine", "Chambre", "Terrasse", "Salon"])
-            im  = st.text_input("Immeuble")
-            et  = st.selectbox("Etage", ["RDC","1","2","3","4","5"])
+            z  = st.selectbox("Zone", ["SDB", "Cuisine", "Chambre", "Terrasse Immeuble", "Salon"])
+            im = st.text_input("Immeuble")
+
+            # Étage uniquement pour les zones autres que Terrasse Immeuble
+            if z != "Terrasse Immeuble":
+                et = st.selectbox("Étage", ["RDC", "1", "2", "3", "4", "5"])
+                lieu_ceram = f"Imm {im} - {et}"
+            else:
+                lieu_ceram = f"Imm {im}"
+
             p_c = st.file_uploader("Photo")
             if st.button("Enregistrer Céramique"):
                 nouvelle = {
-                    "Type": z, "Lieu": f"Imm {im} - {et}",
+                    "Type": z,
+                    "Immeuble": lieu_ceram,
                     "Date": datetime.date.today().strftime("%d/%m"),
                     "photo": p_c.getvalue() if p_c else None
                 }
@@ -369,7 +408,11 @@ elif mode == "🔍 CONSULTATION":
                 st.write(m['Désignation'])
                 if m.get('photo_bl'): st.image(m['photo_bl'], width=300)
                 if st.button("🗑️ Supprimer", key=f"del_m_{i}"):
-                    data['marchandises'].pop(-(i+1)); sauvegarder_donnees(); st.rerun()
+                    entry_to_del = data['marchandises'][-(i+1)]
+                    supprimer_ligne_sheet(tranche, "marchandises", entry_to_del)
+                    data['marchandises'].pop(-(i+1))
+                    sauvegarder_donnees()
+                    st.rerun()
     else:
         m_filter = st.selectbox("Filtrer Métier", ["Marbre", "Céramique", "Électricité", "Plomberie"])
         k = {"Marbre": "marbre", "Céramique": "ceram", "Électricité": "elec", "Plomberie": "plomb"}[m_filter]
@@ -377,17 +420,22 @@ elif mode == "🔍 CONSULTATION":
         st.download_button(f"📥 Rapport PDF {m_filter}", data=creer_pdf_section(m_filter.upper(), data[k], k), file_name=f"{m_filter}.pdf")
 
         for i, entry in enumerate(reversed(data[k])):
-            titre = f"{entry.get('Type', entry.get('Produit'))} - {entry['Date']}"
+            titre = f"{entry.get('Type', entry.get('Produit', '-'))} - {entry.get('Date', '-')}"
             with st.expander(titre):
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.write(f"**Lieu:** {entry['Lieu']}")
-                    if 'Qté' in entry:     st.write(f"**Qté:** {entry['Qté']}")
-                    if 'Surface' in entry: st.write(f"**Surface:** {entry['Surface']} m2")
+                    if 'Lieu' in entry:      st.write(f"**Lieu:** {entry['Lieu']}")
+                    if 'Immeuble' in entry:  st.write(f"**Immeuble:** {entry['Immeuble']}")
+                    if 'Qté' in entry:       st.write(f"**Qté:** {entry['Qté']}")
+                    if 'Surface' in entry:   st.write(f"**Surface:** {entry['Surface']} m2")
                 with col2:
                     if entry.get('photo'): st.image(entry['photo'], width=250)
                 if st.button("🗑️ Supprimer", key=f"del_{k}_{i}"):
-                    data[k].pop(-(i+1)); sauvegarder_donnees(); st.rerun()
+                    entry_to_del = data[k][-(i+1)]
+                    supprimer_ligne_sheet(tranche, k, entry_to_del)
+                    data[k].pop(-(i+1))
+                    sauvegarder_donnees()
+                    st.rerun()
 
 # ================= MODE CATALOGUE =================
 elif mode == "⚙️ CATALOGUE":
@@ -420,7 +468,6 @@ elif mode == "☁️ GOOGLE SHEETS":
         st.error("Les librairies `gspread` et `google-auth` ne sont pas installées. Ajoutez-les à `requirements.txt`.")
         st.stop()
 
-    # --- Statut de connexion ---
     st.subheader("État de la connexion")
     if gs_client:
         st.success("✅ Connecté au compte de service Google.")
@@ -430,97 +477,32 @@ elif mode == "☁️ GOOGLE SHEETS":
         else:
             st.error("❌ Impossible d'ouvrir le Google Sheet. Vérifiez `spreadsheet_id` dans les secrets Streamlit.")
     else:
-        st.error("❌ Non connecté. Configurez vos secrets Streamlit (voir instructions ci-dessous).")
+        st.error("❌ Non connecté. Configurez vos secrets Streamlit.")
 
     st.divider()
 
-    # --- Actions de synchronisation ---
     st.subheader("Actions")
     col1, col2 = st.columns(2)
 
     with col1:
         st.markdown("**📤 Export complet → Google Sheets**")
-        st.caption("Écrase le contenu du Sheet avec toutes les données locales. Utile pour initialiser ou resynchroniser.")
+        st.caption("Écrase le contenu du Sheet avec toutes les données locales.")
         if st.button("Lancer l'export complet", type="primary"):
             with st.spinner("Export en cours..."):
                 exporter_tout_vers_sheets()
 
     with col2:
         st.markdown("**📥 Import Google Sheets → Local**")
-        st.caption("Fusionne les données du Sheet dans l'application (sans doublon). Utile si quelqu'un a modifié le Sheet directement.")
+        st.caption("Fusionne les données du Sheet dans l'application (sans doublon).")
         if st.button("Lancer l'import / fusion"):
             with st.spinner("Import en cours..."):
                 importer_depuis_sheets()
 
     st.divider()
 
-    # --- Structure du Sheet ---
     st.subheader("📋 Structure des onglets Google Sheet")
-    st.markdown("L'application crée automatiquement les onglets suivants dans votre Google Sheet :")
-
     onglets = []
     for tranche_nom, sections in SHEET_TAB_MAP.items():
         for section, tab in sections.items():
             onglets.append({"Onglet": tab, "Tranche": tranche_nom, "Section": section.capitalize(), "Colonnes": ", ".join(HEADERS[section])})
     st.dataframe(pd.DataFrame(onglets), use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # --- Guide de configuration ---
-    with st.expander("📖 Guide de configuration des secrets Streamlit", expanded=not gs_client):
-        st.markdown("""
-### Étape 1 – Préparer le fichier JSON du compte de service
-
-1. Allez sur [Google Cloud Console](https://console.cloud.google.com/)
-2. Sélectionnez votre projet → **APIs & Services → Credentials**
-3. Cliquez sur votre compte de service → **Gérer les clés → Ajouter une clé → JSON**
-4. Téléchargez le fichier `.json`
-
----
-
-### Étape 2 – Partager votre Google Sheet
-
-1. Ouvrez votre Google Sheet
-2. Copiez l'**email** du compte de service (ex: `mon-service@projet.iam.gserviceaccount.com`)
-3. Cliquez **Partager** dans le Sheet → collez cet email → rôle **Éditeur**
-4. Copiez l'**ID du Sheet** depuis l'URL :  
-   `https://docs.google.com/spreadsheets/d/` **`SPREADSHEET_ID`** `/edit`
-
----
-
-### Étape 3 – Configurer les secrets sur Streamlit Cloud
-
-Dans **Streamlit Cloud → App settings → Secrets**, collez :
-
-```toml
-[google_sheet]
-spreadsheet_id = "VOTRE_SPREADSHEET_ID_ICI"
-
-[gcp_service_account]
-type = "service_account"
-project_id = "votre-projet-id"
-private_key_id = "xxxxx"
-private_key = "-----BEGIN RSA PRIVATE KEY-----\\nXXXXX\\n-----END RSA PRIVATE KEY-----\\n"
-client_email = "votre-compte@projet.iam.gserviceaccount.com"
-client_id = "xxxxx"
-auth_uri = "https://accounts.google.com/o/oauth2/auth"
-token_uri = "https://oauth2.googleapis.com/token"
-auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
-client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/votre-compte%40projet.iam.gserviceaccount.com"
-```
-
-> ⚠️ Copiez les valeurs **exactement** depuis le fichier JSON téléchargé. Faites attention aux `\\n` dans `private_key`.
-
----
-
-### Étape 4 – Vérifier requirements.txt
-
-Assurez-vous que votre `requirements.txt` contient :
-```
-streamlit
-fpdf
-gspread
-google-auth
-pandas
-```
-""")
