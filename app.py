@@ -4,180 +4,159 @@ import gspread
 from google.oauth2.service_account import Credentials
 import datetime
 from fpdf import FPDF
-import io
 
-# --- CONFIGURATION GOOGLE SHEETS ---
-SCOPE = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-SHEET_NAME = "BDD_Chantier_Manesmane"
+# --- CONFIGURATION ---
+st.set_page_config(page_title="Portail Manesmane", layout="wide")
 
+# Listes de secours (si le catalogue Sheets est vide)
+DEF_FRS = ["INTERCABLE", "SOFA", "PROMELEC", "MG LIGHTING", "SARABO", "NOVACIM", "SAFI BAINS", "SUPER CERAME", "Autre"]
+DEF_ELEC = ["SPOT", "DISJ", "LED", "SUPPORT 3 MOD", "PRISE 2P+T", "INTERR V&V", "Video phonique"]
+DEF_PLOMB = ["TOILETTE", "VASQUE 60", "MIT DCH", "CHAUFFE EAU", "EVIER"]
+
+# --- CONNEXION ---
 def get_gsheet_client():
     try:
         creds_dict = st.secrets["gcp_service_account"]
-        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPE)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
         return gspread.authorize(creds)
     except Exception as e:
-        st.error(f"Erreur de connexion Google : {e}")
+        st.error(f"Erreur de connexion : {e}")
         return None
 
-# --- FONCTIONS DE LECTURE/ÉCRITURE ---
-def add_to_sheet(worksheet_name, row_data):
+# --- CHARGEMENT DYNAMIQUE ---
+@st.cache_data(ttl=300)
+def load_lists():
     try:
         client = get_gsheet_client()
-        if client:
-            sh = client.open(SHEET_NAME)
-            sheet = sh.worksheet(worksheet_name)
-            sheet.append_row(row_data)
-            return True
-    except Exception as e:
-        st.error(f"Erreur d'écriture : {e}")
-        return False
+        sh = client.open("BDD_Chantier_Manesmane")
+        data = sh.worksheet("Catalogue").get_all_values()
+        if len(data) > 1:
+            df = pd.DataFrame(data[1:], columns=['FRS', 'ELEC', 'PLOMB'])
+            return {
+                "frs": [x for x in df['FRS'] if x] or DEF_FRS,
+                "elec": [x for x in df['ELEC'] if x] or DEF_ELEC,
+                "plomb": [x for x in df['PLOMB'] if x] or DEF_PLOMB
+            }
+    except: pass
+    return {"frs": DEF_FRS, "elec": DEF_ELEC, "plomb": DEF_PLOMB}
 
-def get_all_data(worksheet_name):
+# --- ACTIONS ---
+def save_row(onglet, ligne):
     try:
         client = get_gsheet_client()
-        if client:
-            sh = client.open(SHEET_NAME)
-            sheet = sh.worksheet(worksheet_name)
-            return sheet.get_all_values()
-    except:
-        return []
-    return []
+        sh = client.open("BDD_Chantier_Manesmane")
+        sh.worksheet(onglet).append_row(ligne)
+        st.success(f"Enregistré dans {onglet} ✅")
+    except Exception as e: st.error(f"Erreur : {e}")
 
-# --- GESTION DU CATALOGUE (DYNAMIQUE) ---
-def get_catalogue(column_index):
-    """Récupère les listes depuis l'onglet 'Catalogue' (Col 1: FRS, Col 2: ELEC, Col 3: PLOMB)"""
-    data = get_all_data("Catalogue")
-    if len(data) > 1:
-        # On ignore l'entête et on filtre les cases vides
-        return [row[column_index] for row in data[1:] if len(row) > column_index and row[column_index]]
-    return []
+def delete_last(onglet):
+    try:
+        client = get_gsheet_client()
+        sh = client.open("BDD_Chantier_Manesmane")
+        ws = sh.worksheet(onglet)
+        rows = ws.get_all_values()
+        if len(rows) > 1:
+            ws.delete_rows(len(rows))
+            st.warning("Dernière ligne supprimée 🗑️")
+        else: st.info("Rien à supprimer")
+    except Exception as e: st.error(f"Erreur : {e}")
 
-# --- GÉNÉRATION PDF ---
-def create_pdf(df, title):
+# --- RAPPORT PDF ---
+def export_pdf(df, title):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", 'B', 14)
-    pdf.cell(0, 10, f"RAPPORT : {title.upper()}", 0, 1, 'C')
-    pdf.ln(10)
+    pdf.cell(0, 10, f"RAPPORT {title.upper()}", ln=True, align='C')
     pdf.set_font("Arial", size=9)
-    col_width = 190 / len(df.columns)
-    for col in df.columns:
-        pdf.cell(col_width, 10, str(col), border=1)
+    pdf.ln(5)
+    for col in df.columns: pdf.cell(38, 10, str(col), border=1)
     pdf.ln()
-    for i in range(len(df)):
-        for col in df.columns:
-            pdf.cell(col_width, 8, str(df.iloc[i][col])[:30], border=1)
+    for _, row in df.iterrows():
+        for val in row: pdf.cell(38, 8, str(val)[:20], border=1)
         pdf.ln()
     return pdf.output(dest='S').encode('latin-1')
 
-# --- INTERFACE ---
-st.set_page_config(page_title="Suivi Manesmane", layout="wide")
-st.title("🏗️ LES ORCHIDÉES MANESMANE")
-
-mode = st.sidebar.radio("MODE", ["📝 SAISIE", "🔍 CONSULTATION", "⚙️ CATALOGUE"])
+# --- UI ---
+st.title("🏗️ LES ORCHIDÉES - GESTION TECHNIQUE")
+lists = load_lists()
+mode = st.sidebar.radio("MENU", ["📝 SAISIE", "🔍 CONSULTATION", "⚙️ CATALOGUE"])
 tranche = st.sidebar.selectbox("TRANCHE", ["Tranche 3", "Tranche 4", "Tranche 5"])
 
-# Chargement des listes depuis Google Sheets (Catalogue)
-list_frs = get_catalogue(0) or ["Chargement..."]
-list_elec = get_catalogue(1) or ["Chargement..."]
-list_plomb = get_catalogue(2) or ["Chargement..."]
-
-# ==========================================
-#                MODE CATALOGUE
-# ==========================================
-if mode == "⚙️ CATALOGUE":
-    st.header("⚙️ Gestion du Catalogue")
-    st.info("Ajoutez des éléments ici. Ils seront enregistrés dans l'onglet 'Catalogue' de votre Google Sheets.")
-    
-    cat_col = st.columns(3)
-    
-    with cat_col[0]:
-        new_f = st.text_input("Nouveau Fournisseur")
-        if st.button("➕ Ajouter FRS") and new_f:
-            if add_to_sheet("Catalogue", [new_f, "", ""]): st.success("Ajouté")
-
-    with cat_col[1]:
-        new_e = st.text_input("Nouveau Produit Élec")
-        if st.button("➕ Ajouter Élec") and new_e:
-            if add_to_sheet("Catalogue", ["", new_e, ""]): st.success("Ajouté")
-
-    with cat_col[2]:
-        new_p = st.text_input("Nouveau Produit Plomb")
-        if st.button("➕ Ajouter Plomb") and new_p:
-            if add_to_sheet("Catalogue", ["", "", new_p]): st.success("Ajouté")
-
-# ==========================================
-#                MODE SAISIE
-# ==========================================
-elif mode == "📝 SAISIE":
-    st.header(f"Saisie de Terrain - {tranche}")
-    tabs = st.tabs(["📦 MARCHANDISES", "⚡ ÉLECTRICITÉ", "🚰 PLOMBERIE", "💎 MARBRE", "🧱 CÉRAMIQUE"])
+if mode == "📝 SAISIE":
+    tabs = st.tabs(["📦 March.", "⚡ Elec", "🚰 Plomb", "💎 Marbre", "🧱 Céram"])
+    date_now = datetime.date.today().strftime("%d/%m/%Y")
 
     with tabs[0]: # MARCHANDISES
-        f = st.selectbox("Fournisseur", list_frs)
-        d = st.text_area("Désignation complète")
-        if st.button("Valider Réception"):
-            row = [datetime.date.today().strftime("%d/%m/%Y"), tranche, f, d]
-            if add_to_sheet("Marchandises", row): st.success("Enregistré ✅")
+        f = st.selectbox("Fournisseur", lists["frs"])
+        d = st.text_area("Désignation")
+        c1, c2 = st.columns(2)
+        if c1.button("Valider March."): save_row("Marchandises", [date_now, tranche, f, d])
+        if c2.button("Annuler March."): delete_last("Marchandises")
 
     with tabs[1]: # ELEC
-        p = st.selectbox("Produit Élec", list_elec)
-        q = st.number_input("Quantité", min_value=1, key="q_e")
-        l = st.text_input("Lieu (Imm / Appt)", key="l_e")
-        if st.button("Valider Pose Élec"):
-            if add_to_sheet("Electricite", [datetime.date.today().strftime("%d/%m/%Y"), tranche, p, q, l]): st.success("Enregistré ✅")
+        p = st.selectbox("Produit", lists["elec"])
+        q = st.number_input("Qté", min_value=1, key="qe")
+        l = st.text_input("Localisation (Imm/Appt)", key="le")
+        c1, c2 = st.columns(2)
+        if c1.button("Valider Élec"): save_row("Electricite", [date_now, tranche, p, q, l])
+        if c2.button("Annuler Élec"): delete_last("Electricite")
 
     with tabs[2]: # PLOMB
-        p = st.selectbox("Produit Plomb", list_plomb)
-        q = st.number_input("Quantité", min_value=1, key="q_p")
-        l = st.text_input("Lieu (Imm / Appt / SDB)", key="l_p")
-        if st.button("Valider Pose Plomb"):
-            if add_to_sheet("Plomberie", [datetime.date.today().strftime("%d/%m/%Y"), tranche, p, q, l]): st.success("Enregistré ✅")
+        p = st.selectbox("Produit", lists["plomb"])
+        q = st.number_input("Qté", min_value=1, key="qp")
+        l = st.text_input("Localisation", key="lp")
+        c1, c2 = st.columns(2)
+        if c1.button("Valider Plomb"): save_row("Plomberie", [date_now, tranche, p, q, l])
+        if c2.button("Annuler Plomb"): delete_last("Plomberie")
 
     with tabs[3]: # MARBRE
-        interv = st.selectbox("Intervenant", ["FETTAH", "Simo"])
-        type_m = st.selectbox("Type", ["Gris Bold", "White Sand", "Blanc Carrara"])
-        imm = st.text_input("Immeuble")
-        etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème", "5ème"])
-        appt = st.text_input("N° Appartement (Optionnel)")
-        surf = st.number_input("Surface (m²)", min_value=0.0)
+        inter = st.selectbox("Marbrier", ["FETTAH", "Simo"])
+        m_type = st.selectbox("Marbre", ["Gris Bold", "White Sand", "Blanc Carrara"])
         
-        if st.button("Enregistrer Marbre"):
-            lieu = f"Imm {imm} - {etage}" + (f" - Appt {appt}" if appt else "")
-            if add_to_sheet("Marbre", [datetime.date.today().strftime("%d/%m/%Y"), tranche, interv, type_m, lieu, surf]):
-                st.success("Enregistré ✅")
+        # --- DÉTAIL BLANC CARRARA ---
+        det_bc = ""
+        if m_type == "Blanc Carrara":
+            det_bc = st.selectbox("Élément BC", ["Dallage", "Seuil", "Niche", "Les douches"])
+        
+        imm = st.text_input("Immeuble / Étage")
+        appt = st.text_input("N° Appt")
+        surf = st.number_input("Surface m²", min_value=0.0)
+        
+        c1, c2 = st.columns(2)
+        if c1.button("Valider Marbre"):
+            final_type = f"{m_type} - {det_bc}" if det_bc else m_type
+            lieu = f"{imm} / Appt {appt}"
+            save_row("Marbre", [date_now, tranche, inter, final_type, lieu, surf])
+        if c2.button("Annuler Marbre"): delete_last("Marbre")
 
     with tabs[4]: # CERAMIQUE
         z = st.selectbox("Zone", ["SDB", "Cuisine", "Chambre", "Terrasse", "Salon"])
-        l = st.text_input("Immeuble / Étage", key="l_c")
-        if st.button("Enregistrer Céramique"):
-            if add_to_sheet("Ceramique", [datetime.date.today().strftime("%d/%m/%Y"), tranche, z, l]): st.success("Enregistré ✅")
+        loc = st.text_input("Détails Imm/Etage", key="lc")
+        c1, c2 = st.columns(2)
+        if c1.button("Valider Céram"): save_row("Ceramique", [date_now, tranche, z, loc])
+        if c2.button("Annuler Céram"): delete_last("Ceramique")
 
-# ==========================================
-#           MODE CONSULTATION
-# ==========================================
-else:
-    st.header(f"Consultation - {tranche}")
-    c_tabs = st.tabs(["📦 Marchandises", "⚡ Élec", "🚰 Plomb", "💎 Marbre", "🧱 Céram"])
-    onglets = ["Marchandises", "Electricite", "Plomberie", "Marbre", "Ceramique"]
-    cols = [
-        ["Date", "Tranche", "Fournisseur", "Désignation"],
-        ["Date", "Tranche", "Produit", "Qté", "Lieu"],
-        ["Date", "Tranche", "Produit", "Qté", "Lieu"],
-        ["Date", "Tranche", "Nom", "Type", "Lieu", "Surface"],
-        ["Date", "Tranche", "Zone", "Lieu"]
-    ]
+elif mode == "🔍 CONSULTATION":
+    onglet = st.selectbox("Choisir l'onglet", ["Marchandises", "Electricite", "Plomberie", "Marbre", "Ceramique"])
+    try:
+        client = get_gsheet_client()
+        sh = client.open("BDD_Chantier_Manesmane")
+        data = sh.worksheet(onglet).get_all_values()
+        if len(data) > 1:
+            df = pd.DataFrame(data[1:], columns=data[0])
+            df_view = df[df["Tranche"] == tranche]
+            st.dataframe(df_view, use_container_width=True)
+            if not df_view.empty:
+                pdf_bytes = export_pdf(df_view, onglet)
+                st.download_button("📥 Télécharger Rapport PDF", pdf_bytes, f"{onglet}_{tranche}.pdf")
+        else: st.info("Vide")
+    except: st.error("Erreur de lecture")
 
-    for i, tab in enumerate(c_tabs):
-        with tab:
-            raw_data = get_all_data(onglets[i])
-            if len(raw_data) > 1:
-                df = pd.DataFrame(raw_data[1:], columns=cols[i])
-                df_f = df[df["Tranche"] == tranche]
-                st.dataframe(df_f, use_container_width=True, hide_index=True)
-                
-                if not df_f.empty:
-                    pdf = create_pdf(df_f, onglets[i])
-                    st.download_button(f"📥 Télécharger PDF {onglets[i]}", data=pdf, file_name=f"{onglets[i]}_{tranche}.pdf")
-            else:
-                st.info("Aucune donnée enregistrée.")
+elif mode == "⚙️ CATALOGUE":
+    st.subheader("Configuration du Catalogue")
+    cat_type = st.radio("Ajouter à :", ["Fournisseur", "Électricité", "Plomberie"])
+    new_val = st.text_input("Nom de l'élément")
+    if st.button("➕ Ajouter au Catalogue"):
+        row = [new_val, "", ""] if cat_type == "Fournisseur" else (["", new_val, ""] if cat_type == "Électricité" else ["", "", new_val])
+        save_row("Catalogue", row)
+        st.cache_data.clear()
