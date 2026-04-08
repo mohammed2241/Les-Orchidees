@@ -328,4 +328,4 @@ elif mode == "🔍 CONSULTATION":
                     except: pass
                 if st.checkbox("Confirmer la suppression", key=f"conf_d_{i}"):
                     if st.button("🗑️ Supprimer", key=f"del_d_{i}"):
-                        data['documents'].pop(i); sauvegarder_donnees(); st.rerun()
+                        data['documents'].pop(i); sauvegarder_donnees(); st.rerun() 
