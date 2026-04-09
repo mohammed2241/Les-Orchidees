@@ -34,15 +34,15 @@ SHEET_TAB_MAP = {
 }
 
 HEADERS = {
-    "marchandises": ["Date", "Fournisseur", "Désignation"],
-    "elec":         ["Date", "Produit", "Qté", "Lieu"],
-    "plomb":        ["Date", "Produit", "Qté", "Lieu"],
-    "marbre":       ["Date", "Nom", "Type", "Fournisseur", "Référence", "Lieu", "Surface"],
+    "marchandises": ["Date", "Fournisseur", "Designation"],
+    "elec":         ["Date", "Produit", "Qte", "Lieu"],
+    "plomb":        ["Date", "Produit", "Qte", "Lieu"],
+    "marbre":       ["Date", "Nom", "Type", "Fournisseur", "Reference", "Lieu", "Surface"],
     "ceram":        ["Date", "Type", "Immeuble"],
 }
 
 # =====================================================================
-# --- FONCTIONS GOOGLE SHEETS (définies en premier) ---
+# --- FONCTIONS GOOGLE SHEETS ---
 # =====================================================================
 
 @st.cache_resource(show_spinner=False)
@@ -72,6 +72,28 @@ def get_or_create_worksheet(spreadsheet, tab_name, headers):
         ws.append_row(headers)
     return ws
 
+def row_vers_dict(section, entry):
+    """Convertit une entrée locale vers une ligne Sheets (clés ASCII sans accents)."""
+    mapping = {
+        "marchandises": [("Date","Date"),("Fournisseur","Fournisseur"),("Designation","Désignation")],
+        "elec":         [("Date","Date"),("Produit","Produit"),("Qte","Qté"),("Lieu","Lieu")],
+        "plomb":        [("Date","Date"),("Produit","Produit"),("Qte","Qté"),("Lieu","Lieu")],
+        "marbre":       [("Date","Date"),("Nom","Nom"),("Type","Type"),("Fournisseur","Fournisseur"),("Reference","Référence"),("Lieu","Lieu"),("Surface","Surface")],
+        "ceram":        [("Date","Date"),("Type","Type"),("Immeuble","Immeuble")],
+    }
+    return {sheet_key: str(entry.get(local_key, "")) for sheet_key, local_key in mapping[section]}
+
+def dict_vers_local(section, rec):
+    """Convertit un enregistrement Sheets vers le format local (clés avec accents)."""
+    mapping = {
+        "marchandises": [("Date","Date"),("Fournisseur","Fournisseur"),("Désignation","Designation")],
+        "elec":         [("Date","Date"),("Produit","Produit"),("Qté","Qte"),("Lieu","Lieu")],
+        "plomb":        [("Date","Date"),("Produit","Produit"),("Qté","Qte"),("Lieu","Lieu")],
+        "marbre":       [("Date","Date"),("Nom","Nom"),("Type","Type"),("Fournisseur","Fournisseur"),("Référence","Reference"),("Lieu","Lieu"),("Surface","Surface")],
+        "ceram":        [("Date","Date"),("Type","Type"),("Immeuble","Immeuble")],
+    }
+    return {local_key: rec.get(sheet_key, "") for local_key, sheet_key in mapping[section]}
+
 def synchro_vers_sheets(tranche, section, nouvelle_ligne):
     client = get_gsheet_client()
     if client is None:
@@ -82,8 +104,9 @@ def synchro_vers_sheets(tranche, section, nouvelle_ligne):
     tab_name = SHEET_TAB_MAP[tranche][section]
     headers  = HEADERS[section]
     try:
-        ws = get_or_create_worksheet(spreadsheet, tab_name, headers)
-        row = [str(nouvelle_ligne.get(col, "")) for col in headers]
+        ws  = get_or_create_worksheet(spreadsheet, tab_name, headers)
+        d   = row_vers_dict(section, nouvelle_ligne)
+        row = [d.get(h, "") for h in headers]
         ws.append_row(row, value_input_option="USER_ENTERED")
         return True
     except Exception as e:
@@ -101,7 +124,8 @@ def supprimer_ligne_sheet(tranche, section, entry):
     headers  = HEADERS[section]
     try:
         ws = get_or_create_worksheet(spreadsheet, tab_name, headers)
-        row_to_find = [str(entry.get(col, "")) for col in headers]
+        d  = row_vers_dict(section, entry)
+        row_to_find = [d.get(h, "") for h in headers]
         all_rows = ws.get_all_values()
         for idx, row in enumerate(all_rows):
             if row == row_to_find:
@@ -128,9 +152,9 @@ def exporter_tout_vers_sheets():
             ws = get_or_create_worksheet(spreadsheet, tab_name, headers)
             ws.clear()
             ws.append_row(headers)
-            rows = st.session_state.db[tranche].get(section, [])
-            for entry in rows:
-                row = [str(entry.get(col, "")) for col in headers]
+            for entry in st.session_state.db[tranche].get(section, []):
+                d   = row_vers_dict(section, entry)
+                row = [d.get(h, "") for h in headers]
                 ws.append_row(row, value_input_option="USER_ENTERED")
                 total += 1
     st.success(f"✅ Export complet : {total} lignes envoyées vers Google Sheets.")
@@ -146,21 +170,22 @@ def importer_depuis_sheets():
         return
     total_importe = 0
     for tranche in ["Tranche 3", "Tranche 4", "Tranche 5"]:
-        for section, headers in HEADERS.items():
+        for section in HEADERS:
             tab_name = SHEET_TAB_MAP[tranche][section]
             try:
                 ws = spreadsheet.worksheet(tab_name)
             except Exception:
                 continue
-            records = ws.get_all_records()
+            records    = ws.get_all_records()
             local_list = st.session_state.db[tranche].get(section, [])
             def cle(e):
                 return (e.get("Date",""), e.get("Fournisseur", e.get("Produit", e.get("Nom", e.get("Type","")))))
             existing_keys = {cle(e) for e in local_list}
             for rec in records:
-                if cle(rec) not in existing_keys:
-                    local_list.append(rec)
-                    existing_keys.add(cle(rec))
+                entry = dict_vers_local(section, rec)
+                if cle(entry) not in existing_keys:
+                    local_list.append(entry)
+                    existing_keys.add(cle(entry))
                     total_importe += 1
             st.session_state.db[tranche][section] = local_list
     sauvegarder_donnees()
@@ -175,14 +200,14 @@ def charger_depuis_sheets_au_demarrage():
     if spreadsheet is None:
         return
     for tranche in ["Tranche 3", "Tranche 4", "Tranche 5"]:
-        for section, headers in HEADERS.items():
+        for section in HEADERS:
             tab_name = SHEET_TAB_MAP[tranche][section]
             try:
                 ws = spreadsheet.worksheet(tab_name)
             except Exception:
                 continue
             records = ws.get_all_records()
-            st.session_state.db[tranche][section] = list(records)
+            st.session_state.db[tranche][section] = [dict_vers_local(section, r) for r in records]
     sauvegarder_donnees()
 
 # =====================================================================
@@ -215,7 +240,7 @@ def sauvegarder_donnees():
         pickle.dump(st.session_state.db, f)
 
 # =====================================================================
-# --- DÉMARRAGE : init + rechargement automatique depuis Sheets ---
+# --- DÉMARRAGE ---
 # =====================================================================
 
 if 'db' not in st.session_state:
@@ -234,7 +259,7 @@ if 'sheets_loaded' not in st.session_state:
 cfg = st.session_state.db["config"]
 
 # =====================================================================
-# --- GÉNÉRATEUR PDF ---
+# --- GÉNÉRATEUR PDF (couvre toutes les sections) ---
 # =====================================================================
 
 def creer_pdf_section(titre, data_list, type_rapport):
@@ -243,12 +268,18 @@ def creer_pdf_section(titre, data_list, type_rapport):
     pdf.set_font('Arial', 'B', 14)
     pdf.cell(0, 10, f"RAPPORT : {titre}", ln=True, align='C')
     pdf.ln(5)
+
+    # Filtrer les lignes vraiment vides
+    data_list = [r for r in data_list if r.get('Date','') or r.get('Fournisseur','') or r.get('Produit','') or r.get('Type','')]
+
     if not data_list:
         pdf.set_font('Arial', 'I', 10)
         pdf.cell(0, 10, "Aucune donnee enregistree.", ln=True)
         return pdf.output(dest='S').encode('latin-1')
+
     pdf.set_font('Arial', 'B', 8)
     pdf.set_fill_color(230, 230, 230)
+
     if type_rapport == "marchandises":
         cols = ["DATE", "FOURNISSEUR", "DESIGNATION"]
         w = [30, 50, 110]
@@ -259,6 +290,7 @@ def creer_pdf_section(titre, data_list, type_rapport):
             pdf.cell(30, 8, str(r.get('Date', '-')), 1)
             pdf.cell(50, 8, str(r.get('Fournisseur', '-'))[:25], 1)
             pdf.cell(110, 8, str(r.get('Désignation', '-'))[:65], 1, 1)
+
     elif type_rapport == "marbre":
         cols = ["DATE", "INTERV.", "TYPE", "LIEU", "M2"]
         w = [25, 30, 50, 60, 25]
@@ -271,6 +303,30 @@ def creer_pdf_section(titre, data_list, type_rapport):
             pdf.cell(50, 8, str(r.get('Type', '-'))[:35], 1)
             pdf.cell(60, 8, str(r.get('Lieu', '-'))[:45], 1)
             pdf.cell(25, 8, f"{r.get('Surface', '0')} m2", 1, 1)
+
+    elif type_rapport in ("elec", "plomb"):
+        cols = ["DATE", "PRODUIT", "QTE", "LIEU"]
+        w = [25, 65, 20, 80]
+        for i, c in enumerate(cols): pdf.cell(w[i], 10, c, 1, 0, 'C', True)
+        pdf.ln()
+        pdf.set_font('Arial', '', 8)
+        for r in data_list:
+            pdf.cell(25, 8, str(r.get('Date', '-')), 1)
+            pdf.cell(65, 8, str(r.get('Produit', '-'))[:38], 1)
+            pdf.cell(20, 8, str(r.get('Qté', '-')), 1)
+            pdf.cell(80, 8, str(r.get('Lieu', '-'))[:48], 1, 1)
+
+    elif type_rapport == "ceram":
+        cols = ["DATE", "ZONE", "IMMEUBLE"]
+        w = [25, 65, 100]
+        for i, c in enumerate(cols): pdf.cell(w[i], 10, c, 1, 0, 'C', True)
+        pdf.ln()
+        pdf.set_font('Arial', '', 8)
+        for r in data_list:
+            pdf.cell(25, 8, str(r.get('Date', '-')), 1)
+            pdf.cell(65, 8, str(r.get('Type', '-'))[:38], 1)
+            pdf.cell(100, 8, str(r.get('Immeuble', '-'))[:58], 1, 1)
+
     return pdf.output(dest='S').encode('latin-1')
 
 # =====================================================================
@@ -315,7 +371,6 @@ if mode == "📝 SAISIE":
             interv = st.selectbox("Intervenant", ["FETTAH", "Simo"])
             type_m = st.selectbox("Type Marbre", ["Gris Bold", "White Sand", "Blanc Carrara"])
 
-            # ---- WHITE SAND ----
             if type_m == "White Sand":
                 imm         = st.text_input("Immeuble")
                 emplacement = st.selectbox("Emplacement", ["Magasin", "Entrée"])
@@ -332,7 +387,6 @@ if mode == "📝 SAISIE":
                     synchro_vers_sheets(tranche, "marbre", nouvelle)
                     st.success("Saisie Marbre Validée")
 
-            # ---- BLANC CARRARA ----
             elif type_m == "Blanc Carrara":
                 sous_type_bc = st.selectbox("Élément Blanc Carrara", ["Dallage", "Seuil", "Niche", "Les douches"])
                 fourn, ref_v, surf, appt = "", "", 0.0, ""
@@ -359,8 +413,7 @@ if mode == "📝 SAISIE":
                     synchro_vers_sheets(tranche, "marbre", nouvelle)
                     st.success("Saisie Marbre Validée")
 
-            # ---- GRIS BOLD ----
-            else:
+            else:  # Gris Bold
                 imm   = st.text_input("Immeuble")
                 etage = st.selectbox("Étage", ["RDC", "1er", "2ème", "3ème", "4ème", "5ème"])
                 p_m   = st.file_uploader("Photo de la pose")
@@ -376,7 +429,6 @@ if mode == "📝 SAISIE":
                     synchro_vers_sheets(tranche, "marbre", nouvelle)
                     st.success("Saisie Marbre Validée")
 
-        # ---- CÉRAMIQUE ----
         elif spec == "Céramique":
             z  = st.selectbox("Zone", ["SDB", "Cuisine", "Chambre", "Terrasse Immeuble", "Salon"])
             im = st.text_input("Immeuble")
@@ -397,8 +449,7 @@ if mode == "📝 SAISIE":
                 synchro_vers_sheets(tranche, "ceram", nouvelle)
                 st.success("Céramique Validée")
 
-        # ---- ELEC / PLOMB ----
-        else:
+        else:  # Elec / Plomb
             prods = cfg["produits_elec"] if spec == "Électricité" else cfg["produits_plomb"]
             p_sel = st.selectbox("Produit", prods)
             q     = st.number_input("Quantité", min_value=1)
@@ -418,13 +469,21 @@ if mode == "📝 SAISIE":
 
 # ================= MODE CONSULTATION =================
 elif mode == "🔍 CONSULTATION":
+    # Toujours relire depuis session_state pour avoir les données à jour
+    data = st.session_state.db[tranche]
     cat_consul = st.radio("Section", ["Marchandises", "Suivi Chantier"], horizontal=True)
 
     if cat_consul == "Marchandises":
-        st.download_button("📥 Rapport PDF Marchandises", data=creer_pdf_section("MARCHANDISES", data['marchandises'], "marchandises"), file_name="Marchandises.pdf")
+        st.download_button(
+            "📥 Rapport PDF Marchandises",
+            data=creer_pdf_section("MARCHANDISES", data['marchandises'], "marchandises"),
+            file_name="Marchandises.pdf"
+        )
+        if not data['marchandises']:
+            st.info("Aucune marchandise enregistrée pour cette tranche.")
         for i, m in enumerate(reversed(data['marchandises'])):
-            with st.expander(f"📦 {m['Fournisseur']} - {m['Date']}"):
-                st.write(m['Désignation'])
+            with st.expander(f"📦 {m.get('Fournisseur','-')} - {m.get('Date','-')}"):
+                st.write(m.get('Désignation', ''))
                 if m.get('photo_bl'): st.image(m['photo_bl'], width=300)
                 if st.button("🗑️ Supprimer", key=f"del_m_{i}"):
                     entry_to_del = data['marchandises'][-(i+1)]
@@ -435,16 +494,29 @@ elif mode == "🔍 CONSULTATION":
     else:
         m_filter = st.selectbox("Filtrer Métier", ["Marbre", "Céramique", "Électricité", "Plomberie"])
         k = {"Marbre": "marbre", "Céramique": "ceram", "Électricité": "elec", "Plomberie": "plomb"}[m_filter]
-        st.download_button(f"📥 Rapport PDF {m_filter}", data=creer_pdf_section(m_filter.upper(), data[k], k), file_name=f"{m_filter}.pdf")
+        pdf_key = {"Marbre": "marbre", "Céramique": "ceram", "Électricité": "elec", "Plomberie": "plomb"}[m_filter]
+
+        st.download_button(
+            f"📥 Rapport PDF {m_filter}",
+            data=creer_pdf_section(m_filter.upper(), data[k], pdf_key),
+            file_name=f"{m_filter}.pdf"
+        )
+
+        if not data[k]:
+            st.info(f"Aucune donnée {m_filter} enregistrée pour cette tranche.")
+
         for i, entry in enumerate(reversed(data[k])):
             titre = f"{entry.get('Type', entry.get('Produit', '-'))} - {entry.get('Date', '-')}"
             with st.expander(titre):
                 col1, col2 = st.columns(2)
                 with col1:
-                    if 'Lieu' in entry:     st.write(f"**Lieu:** {entry['Lieu']}")
-                    if 'Immeuble' in entry: st.write(f"**Immeuble:** {entry['Immeuble']}")
-                    if 'Qté' in entry:      st.write(f"**Qté:** {entry['Qté']}")
-                    if 'Surface' in entry:  st.write(f"**Surface:** {entry['Surface']} m2")
+                    if entry.get('Lieu'):      st.write(f"**Lieu:** {entry['Lieu']}")
+                    if entry.get('Immeuble'):  st.write(f"**Immeuble:** {entry['Immeuble']}")
+                    if entry.get('Qté'):       st.write(f"**Qté:** {entry['Qté']}")
+                    if entry.get('Surface'):   st.write(f"**Surface:** {entry['Surface']} m2")
+                    if entry.get('Nom'):       st.write(f"**Intervenant:** {entry['Nom']}")
+                    if entry.get('Fournisseur') and entry.get('Fournisseur') not in ("", "None"):
+                        st.write(f"**Fournisseur:** {entry['Fournisseur']}")
                 with col2:
                     if entry.get('photo'): st.image(entry['photo'], width=250)
                 if st.button("🗑️ Supprimer", key=f"del_{k}_{i}"):
