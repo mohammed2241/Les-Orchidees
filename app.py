@@ -28,8 +28,8 @@ SHEET_TAB_MAP = {
 
 HEADERS = {
     "marchandises": ["Date","Fournisseur","Designation"],
-    "elec":         ["Date","Produit","Qte","Lieu"],
-    "plomb":        ["Date","Produit","Qte","Lieu"],
+    "elec":         ["Date","Produit","Qté","Lieu"],
+    "plomb":        ["Date","Produit","Qté","Lieu"],
     "marbre":       ["Date","Nom","Type","Fournisseur","Reference","Lieu","Surface"],
     "ceram":        ["Date","Type","Immeuble"],
 }
@@ -66,8 +66,8 @@ def get_or_create_worksheet(spreadsheet, tab_name, headers):
 def row_vers_dict(section, entry):
     mapping = {
         "marchandises": [("Date","Date"),("Fournisseur","Fournisseur"),("Designation","Designation")],
-        "elec":         [("Date","Date"),("Produit","Produit"),("Qte","Qte"),("Lieu","Lieu")],
-        "plomb":        [("Date","Date"),("Produit","Produit"),("Qte","Qte"),("Lieu","Lieu")],
+        "elec":         [("Date","Date"),("Produit","Produit"),("Qté","Qte"),("Lieu","Lieu")],
+        "plomb":        [("Date","Date"),("Produit","Produit"),("Qté","Qte"),("Lieu","Lieu")],
         "marbre":       [("Date","Date"),("Nom","Nom"),("Type","Type"),("Fournisseur","Fournisseur"),("Reference","Reference"),("Lieu","Lieu"),("Surface","Surface")],
         "ceram":        [("Date","Date"),("Type","Type"),("Immeuble","Immeuble")],
     }
@@ -76,8 +76,8 @@ def row_vers_dict(section, entry):
 def dict_vers_local(section, rec):
     mapping = {
         "marchandises": [("Date","Date"),("Fournisseur","Fournisseur"),("Designation","Designation")],
-        "elec":         [("Date","Date"),("Produit","Produit"),("Qte","Qte"),("Lieu","Lieu")],
-        "plomb":        [("Date","Date"),("Produit","Produit"),("Qte","Qte"),("Lieu","Lieu")],
+        "elec":         [("Date","Date"),("Produit","Produit"),("Qte","Qté"),("Lieu","Lieu")],
+        "plomb":        [("Date","Date"),("Produit","Produit"),("Qte","Qté"),("Lieu","Lieu")],
         "marbre":       [("Date","Date"),("Nom","Nom"),("Type","Type"),("Fournisseur","Fournisseur"),("Reference","Reference"),("Lieu","Lieu"),("Surface","Surface")],
         "ceram":        [("Date","Date"),("Type","Type"),("Immeuble","Immeuble")],
     }
@@ -206,13 +206,9 @@ if "db" not in st.session_state:
     st.session_state.db = charger_donnees()
 
 if "sheets_loaded" not in st.session_state:
-    toutes_vides = all(
-        len(st.session_state.db[t][s]) == 0
-        for t in ["Tranche 3","Tranche 4","Tranche 5"]
-        for s in ["marchandises","elec","plomb","marbre","ceram"]
-    )
-    if toutes_vides:
-        charger_depuis_sheets_au_demarrage()
+    # Toujours recharger depuis Sheets au demarrage d'une nouvelle session
+    # Cela garantit que les donnees sont presentes meme apres mise en veille
+    charger_depuis_sheets_au_demarrage()
     st.session_state.sheets_loaded = True
 
 cfg = st.session_state.db["config"]
@@ -283,7 +279,7 @@ def creer_pdf_section(titre, data_list, type_rapport):
         total_qte = 0
         for r in data_list:
             qte = 0
-            try: qte = int(r.get("Qte",r.get("Qte",0)))
+            try: qte = int(float(str(r.get("Qte","0") or "0")))
             except: pass
             total_qte += qte
             pdf.cell(25,8,str(r.get("Date","-")),1)
@@ -438,7 +434,8 @@ elif mode == "CONSULTATION":
                 with c1:
                     if entry.get("Lieu"):      st.write(f"Lieu: {entry['Lieu']}")
                     if entry.get("Immeuble"):  st.write(f"Immeuble: {entry['Immeuble']}")
-                    if entry.get("Qte"):       st.write(f"Qte: {entry['Qte']}")
+                    qte_val = entry.get("Qte", entry.get("Qte",""))
+                    if qte_val: st.write(f"Quantite: {qte_val}")
                     if entry.get("Surface"):   st.write(f"Surface: {entry['Surface']} m2")
                     if entry.get("Nom"):       st.write(f"Intervenant: {entry['Nom']}")
                 with c2:
