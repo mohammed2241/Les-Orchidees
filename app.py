@@ -206,8 +206,6 @@ if "db" not in st.session_state:
     st.session_state.db = charger_donnees()
 
 if "sheets_loaded" not in st.session_state:
-    # Toujours recharger depuis Sheets au demarrage d'une nouvelle session
-    # Cela garantit que les donnees sont presentes meme apres mise en veille
     charger_depuis_sheets_au_demarrage()
     st.session_state.sheets_loaded = True
 
@@ -264,7 +262,6 @@ def creer_pdf_section(titre, data_list, type_rapport):
             pdf.cell(48,8,str(r.get("Type","-"))[:32],1)
             pdf.cell(60,8,str(r.get("Lieu","-"))[:42],1)
             pdf.cell(22,8,f"{surf} m2",1,1)
-        # Ligne TOTAL
         pdf.set_font("Arial","B",8)
         pdf.set_fill_color(230,230,230)
         pdf.cell(158,8,"TOTAL",1,0,"R",True)
@@ -286,7 +283,6 @@ def creer_pdf_section(titre, data_list, type_rapport):
             pdf.cell(65,8,str(r.get("Produit","-"))[:38],1)
             pdf.cell(20,8,str(qte),1)
             pdf.cell(80,8,str(r.get("Lieu","-"))[:48],1,1)
-        # Ligne TOTAL
         pdf.set_font("Arial","B",8)
         pdf.set_fill_color(230,230,230)
         pdf.cell(170,8,"TOTAL",1,0,"R",True)
@@ -412,38 +408,47 @@ elif mode == "CONSULTATION":
 
     if cat == "Marchandises":
         st.download_button("Rapport PDF Marchandises", data=creer_pdf_section("MARCHANDISES",data["marchandises"],"marchandises"), file_name="Marchandises.pdf")
-        if not data["marchandises"]: st.info("Aucune marchandise pour cette tranche.")
-        for i,m in enumerate(reversed(data["marchandises"])):
-            with st.expander(f"{m.get('Fournisseur','-')} - {m.get('Date','-')}"):
-                st.write(m.get("Designation",""))
-                if m.get("photo_bl"): st.image(m["photo_bl"], width=300)
-                if st.button("Supprimer", key=f"del_m_{i}"):
-                    e = data["marchandises"][-(i+1)]
-                    supprimer_ligne_sheet(tranche,"marchandises",e)
-                    data["marchandises"].pop(-(i+1)); sauvegarder_donnees(); st.rerun()
+        if not data["marchandises"]:
+            st.info("Aucune marchandise pour cette tranche.")
+        for i, m in enumerate(reversed(data["marchandises"])):
+            st.markdown("---")
+            st.markdown(f"**{m.get('Fournisseur', '-')}** — {m.get('Date', '-')}")
+            st.write(m.get("Designation", ""))
+            if m.get("photo_bl"):
+                st.image(m["photo_bl"], width=300)
+            if st.button("Supprimer", key=f"del_m_{i}"):
+                e = data["marchandises"][-(i+1)]
+                supprimer_ligne_sheet(tranche, "marchandises", e)
+                data["marchandises"].pop(-(i+1))
+                sauvegarder_donnees()
+                st.rerun()
+
     else:
         filtre = st.selectbox("Filtrer Metier",["Marbre","Ceramique","Electricite","Plomberie"])
         k = {"Marbre":"marbre","Ceramique":"ceram","Electricite":"elec","Plomberie":"plomb"}[filtre]
         pk = {"Marbre":"marbre","Ceramique":"ceram","Electricite":"elec","Plomberie":"plomb"}[filtre]
         st.download_button(f"Rapport PDF {filtre}", data=creer_pdf_section(filtre.upper(),data[k],pk), file_name=f"{filtre}.pdf")
-        if not data[k]: st.info(f"Aucune donnee {filtre} pour cette tranche.")
-        for i,entry in enumerate(reversed(data[k])):
-            titre = f"{entry.get('Type',entry.get('Produit','-'))} - {entry.get('Date','-')}"
-            with st.expander(titre):
-                c1,c2 = st.columns(2)
-                with c1:
-                    if entry.get("Lieu"):      st.write(f"Lieu: {entry['Lieu']}")
-                    if entry.get("Immeuble"):  st.write(f"Immeuble: {entry['Immeuble']}")
-                    qte_val = entry.get("Qte", entry.get("Qte",""))
-                    if qte_val: st.write(f"Quantite: {qte_val}")
-                    if entry.get("Surface"):   st.write(f"Surface: {entry['Surface']} m2")
-                    if entry.get("Nom"):       st.write(f"Intervenant: {entry['Nom']}")
-                with c2:
-                    if entry.get("photo"): st.image(entry["photo"], width=250)
-                if st.button("Supprimer", key=f"del_{k}_{i}"):
-                    e = data[k][-(i+1)]
-                    supprimer_ligne_sheet(tranche,k,e)
-                    data[k].pop(-(i+1)); sauvegarder_donnees(); st.rerun()
+        if not data[k]:
+            st.info(f"Aucune donnee {filtre} pour cette tranche.")
+        for i, entry in enumerate(reversed(data[k])):
+            st.markdown("---")
+            st.markdown(f"**{entry.get('Type', entry.get('Produit', '-'))}** — {entry.get('Date', '-')}")
+            c1, c2 = st.columns(2)
+            with c1:
+                if entry.get("Lieu"):      st.write(f"Lieu: {entry['Lieu']}")
+                if entry.get("Immeuble"):  st.write(f"Immeuble: {entry['Immeuble']}")
+                qte_val = entry.get("Qte", "")
+                if qte_val:                st.write(f"Quantite: {qte_val}")
+                if entry.get("Surface"):   st.write(f"Surface: {entry['Surface']} m2")
+                if entry.get("Nom"):       st.write(f"Intervenant: {entry['Nom']}")
+            with c2:
+                if entry.get("photo"):     st.image(entry["photo"], width=250)
+            if st.button("Supprimer", key=f"del_{k}_{i}"):
+                e = data[k][-(i+1)]
+                supprimer_ligne_sheet(tranche, k, e)
+                data[k].pop(-(i+1))
+                sauvegarder_donnees()
+                st.rerun()
 
 # ===== CATALOGUE =====
 elif mode == "CATALOGUE":
