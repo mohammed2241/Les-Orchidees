@@ -206,6 +206,8 @@ if "db" not in st.session_state:
     st.session_state.db = charger_donnees()
 
 if "sheets_loaded" not in st.session_state:
+    # Toujours recharger depuis Sheets au demarrage d'une nouvelle session
+    # Cela garantit que les donnees sont presentes meme apres mise en veille
     charger_depuis_sheets_au_demarrage()
     st.session_state.sheets_loaded = True
 
@@ -216,88 +218,149 @@ cfg = st.session_state.db["config"]
 # ============================================================
 
 def creer_pdf_section(titre, data_list, type_rapport):
+    from collections import defaultdict
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial","B",14)
-    pdf.cell(0, 10, f"RAPPORT : {titre}", ln=True, align="C")
+    pdf.set_font("Arial","B",16)
+    pdf.cell(0,12,f"RAPPORT : {titre}",ln=True,align="C")
     pdf.set_font("Arial","I",9)
-    pdf.cell(0, 6, f"Edite le {datetime.date.today().strftime('%d/%m/%Y')}", ln=True, align="C")
+    pdf.cell(0,6,f"Edite le {datetime.date.today().strftime('%d/%m/%Y')}",ln=True,align="C")
     pdf.ln(4)
 
     data_list = [r for r in data_list if r.get("Date","") or r.get("Fournisseur","") or r.get("Produit","") or r.get("Type","")]
 
     if not data_list:
         pdf.set_font("Arial","I",10)
-        pdf.cell(0,10,"Aucune donnee enregistree.", ln=True)
+        pdf.cell(0,10,"Aucune donnee enregistree.",ln=True)
         return pdf.output(dest="S").encode("latin-1")
 
-    pdf.set_font("Arial","B",8)
-    pdf.set_fill_color(210, 220, 235)
+    def entete_groupe(label):
+        pdf.set_fill_color(44,62,100)
+        pdf.set_text_color(255,255,255)
+        pdf.set_font("Arial","B",10)
+        pdf.cell(0,10,f"  {label}",ln=True,fill=True)
+        pdf.set_text_color(0,0,0)
 
+    def ligne_total_qte(total):
+        pdf.set_fill_color(220,230,245)
+        pdf.set_font("Arial","B",8)
+        pdf.cell(170,7,"TOTAL",1,0,"R",True)
+        pdf.cell(20,7,str(total),1,1,"C",True)
+
+    def ligne_total_m2(total):
+        pdf.set_fill_color(220,230,245)
+        pdf.set_font("Arial","B",8)
+        pdf.cell(158,7,"TOTAL",1,0,"R",True)
+        pdf.cell(22,7,f"{total:.2f} m2",1,1,"C",True)
+
+    # ---- MARCHANDISES : groupe par fournisseur ----
     if type_rapport == "marchandises":
-        cols = ["DATE","FOURNISSEUR","DESIGNATION"]
-        w    = [30, 55, 105]
-        for i,c in enumerate(cols): pdf.cell(w[i],10,c,1,0,"C",True)
-        pdf.ln()
-        pdf.set_font("Arial","",8)
+        groupes = defaultdict(list)
         for r in data_list:
-            pdf.cell(30,8,str(r.get("Date","-")),1)
-            pdf.cell(55,8,str(r.get("Fournisseur","-"))[:30],1)
-            pdf.cell(105,8,str(r.get("Designation","-"))[:65],1,1)
+            groupes[r.get("Fournisseur","Inconnu")].append(r)
+        for frs, lignes in sorted(groupes.items()):
+            entete_groupe(frs)
+            pdf.set_fill_color(210,220,235)
+            pdf.set_font("Arial","B",8)
+            for c,w in [("DATE",30),("DESIGNATION",160)]:
+                pdf.cell(w,8,c,1,0,"C",True)
+            pdf.ln()
+            pdf.set_font("Arial","",8)
+            for r in lignes:
+                pdf.cell(30,7,str(r.get("Date","-")),1)
+                pdf.cell(160,7,str(r.get("Designation","-"))[:95],1,1)
+            pdf.ln(3)
 
-    elif type_rapport == "marbre":
-        cols = ["DATE","INTERV.","TYPE","LIEU","M2"]
-        w    = [22,28,48,60,22]
-        for i,c in enumerate(cols): pdf.cell(w[i],10,c,1,0,"C",True)
-        pdf.ln()
-        pdf.set_font("Arial","",7)
-        total_m2 = 0
-        for r in data_list:
-            surf = 0
-            try: surf = float(r.get("Surface",0))
-            except: pass
-            total_m2 += surf
-            pdf.cell(22,8,str(r.get("Date","-")),1)
-            pdf.cell(28,8,str(r.get("Nom","-")),1)
-            pdf.cell(48,8,str(r.get("Type","-"))[:32],1)
-            pdf.cell(60,8,str(r.get("Lieu","-"))[:42],1)
-            pdf.cell(22,8,f"{surf} m2",1,1)
-        pdf.set_font("Arial","B",8)
-        pdf.set_fill_color(230,230,230)
-        pdf.cell(158,8,"TOTAL",1,0,"R",True)
-        pdf.cell(22,8,f"{total_m2:.2f} m2",1,1,"C",True)
-
+    # ---- ELEC / PLOMB : groupe par produit ----
     elif type_rapport in ("elec","plomb"):
-        cols = ["DATE","PRODUIT","QTE","LIEU"]
-        w    = [25,65,20,80]
-        for i,c in enumerate(cols): pdf.cell(w[i],10,c,1,0,"C",True)
-        pdf.ln()
-        pdf.set_font("Arial","",8)
-        total_qte = 0
+        groupes = defaultdict(list)
         for r in data_list:
-            qte = 0
-            try: qte = int(float(str(r.get("Qte","0") or "0")))
-            except: pass
-            total_qte += qte
-            pdf.cell(25,8,str(r.get("Date","-")),1)
-            pdf.cell(65,8,str(r.get("Produit","-"))[:38],1)
-            pdf.cell(20,8,str(qte),1)
-            pdf.cell(80,8,str(r.get("Lieu","-"))[:48],1,1)
-        pdf.set_font("Arial","B",8)
-        pdf.set_fill_color(230,230,230)
-        pdf.cell(170,8,"TOTAL",1,0,"R",True)
-        pdf.cell(20,8,str(total_qte),1,1,"C",True)
+            groupes[r.get("Produit","Inconnu")].append(r)
+        total_general = 0
+        for produit, lignes in sorted(groupes.items()):
+            entete_groupe(produit)
+            pdf.set_fill_color(210,220,235)
+            pdf.set_font("Arial","B",8)
+            for c,w in [("DATE",25),("QTE",20),("LIEU",145)]:
+                pdf.cell(w,8,c,1,0,"C",True)
+            pdf.ln()
+            pdf.set_font("Arial","",8)
+            total_qte = 0
+            for r in lignes:
+                qte = 0
+                try: qte = int(float(str(r.get("Qte","0") or "0")))
+                except: pass
+                total_qte += qte
+                pdf.cell(25,7,str(r.get("Date","-")),1)
+                pdf.cell(20,7,str(qte),1,0,"C")
+                pdf.cell(145,7,str(r.get("Lieu","-"))[:85],1,1)
+            ligne_total_qte(total_qte)
+            total_general += total_qte
+            pdf.ln(3)
+        # Total general
+        pdf.set_fill_color(44,62,100)
+        pdf.set_text_color(255,255,255)
+        pdf.set_font("Arial","B",9)
+        pdf.cell(170,9,"TOTAL GENERAL",1,0,"R",True)
+        pdf.cell(20,9,str(total_general),1,1,"C",True)
+        pdf.set_text_color(0,0,0)
 
-    elif type_rapport == "ceram":
-        cols = ["DATE","ZONE","IMMEUBLE"]
-        w    = [25,65,100]
-        for i,c in enumerate(cols): pdf.cell(w[i],10,c,1,0,"C",True)
-        pdf.ln()
-        pdf.set_font("Arial","",8)
+    # ---- MARBRE : groupe par type ----
+    elif type_rapport == "marbre":
+        groupes = defaultdict(list)
         for r in data_list:
-            pdf.cell(25,8,str(r.get("Date","-")),1)
-            pdf.cell(65,8,str(r.get("Type","-"))[:38],1)
-            pdf.cell(100,8,str(r.get("Immeuble","-"))[:58],1,1)
+            groupes[r.get("Type","Inconnu")].append(r)
+        total_general = 0
+        for type_m, lignes in sorted(groupes.items()):
+            entete_groupe(type_m)
+            pdf.set_fill_color(210,220,235)
+            pdf.set_font("Arial","B",8)
+            for c,w in [("DATE",22),("INTERV.",28),("LIEU",100),("M2",40)]:
+                pdf.cell(w,8,c,1,0,"C",True)
+            pdf.ln()
+            pdf.set_font("Arial","",7)
+            total_m2 = 0
+            for r in lignes:
+                surf = 0
+                try: surf = float(r.get("Surface",0))
+                except: pass
+                total_m2 += surf
+                pdf.cell(22,7,str(r.get("Date","-")),1)
+                pdf.cell(28,7,str(r.get("Nom","-")),1)
+                pdf.cell(100,7,str(r.get("Lieu","-"))[:60],1)
+                pdf.cell(40,7,f"{surf} m2",1,1)
+            ligne_total_m2(total_m2)
+            total_general += total_m2
+            pdf.ln(3)
+        # Total general
+        pdf.set_fill_color(44,62,100)
+        pdf.set_text_color(255,255,255)
+        pdf.set_font("Arial","B",9)
+        pdf.cell(150,9,"TOTAL GENERAL",1,0,"R",True)
+        pdf.cell(40,9,f"{total_general:.2f} m2",1,1,"C",True)
+        pdf.set_text_color(0,0,0)
+
+    # ---- CERAMIQUE : groupe par zone ----
+    elif type_rapport == "ceram":
+        groupes = defaultdict(list)
+        for r in data_list:
+            groupes[r.get("Type","Inconnu")].append(r)
+        for zone, lignes in sorted(groupes.items()):
+            entete_groupe(zone)
+            pdf.set_fill_color(210,220,235)
+            pdf.set_font("Arial","B",8)
+            for c,w in [("DATE",25),("IMMEUBLE",165)]:
+                pdf.cell(w,8,c,1,0,"C",True)
+            pdf.ln()
+            pdf.set_font("Arial","",8)
+            for r in lignes:
+                pdf.cell(25,7,str(r.get("Date","-")),1)
+                pdf.cell(165,7,str(r.get("Immeuble","-"))[:98],1,1)
+            pdf.set_fill_color(220,230,245)
+            pdf.set_font("Arial","B",8)
+            pdf.cell(165,7,f"TOTAL : {len(lignes)} pose(s)",1,0,"R",True)
+            pdf.cell(25,7,str(len(lignes)),1,1,"C",True)
+            pdf.ln(3)
 
     return pdf.output(dest="S").encode("latin-1")
 
@@ -408,47 +471,38 @@ elif mode == "CONSULTATION":
 
     if cat == "Marchandises":
         st.download_button("Rapport PDF Marchandises", data=creer_pdf_section("MARCHANDISES",data["marchandises"],"marchandises"), file_name="Marchandises.pdf")
-        if not data["marchandises"]:
-            st.info("Aucune marchandise pour cette tranche.")
-        for i, m in enumerate(reversed(data["marchandises"])):
-            st.markdown("---")
-            st.markdown(f"**{m.get('Fournisseur', '-')}** — {m.get('Date', '-')}")
-            st.write(m.get("Designation", ""))
-            if m.get("photo_bl"):
-                st.image(m["photo_bl"], width=300)
-            if st.button("Supprimer", key=f"del_m_{i}"):
-                e = data["marchandises"][-(i+1)]
-                supprimer_ligne_sheet(tranche, "marchandises", e)
-                data["marchandises"].pop(-(i+1))
-                sauvegarder_donnees()
-                st.rerun()
-
+        if not data["marchandises"]: st.info("Aucune marchandise pour cette tranche.")
+        for i,m in enumerate(reversed(data["marchandises"])):
+            with st.expander(f"{m.get('Fournisseur','-')} - {m.get('Date','-')}"):
+                st.write(m.get("Designation",""))
+                if m.get("photo_bl"): st.image(m["photo_bl"], width=300)
+                if st.button("Supprimer", key=f"del_m_{i}"):
+                    e = data["marchandises"][-(i+1)]
+                    supprimer_ligne_sheet(tranche,"marchandises",e)
+                    data["marchandises"].pop(-(i+1)); sauvegarder_donnees(); st.rerun()
     else:
         filtre = st.selectbox("Filtrer Metier",["Marbre","Ceramique","Electricite","Plomberie"])
         k = {"Marbre":"marbre","Ceramique":"ceram","Electricite":"elec","Plomberie":"plomb"}[filtre]
         pk = {"Marbre":"marbre","Ceramique":"ceram","Electricite":"elec","Plomberie":"plomb"}[filtre]
         st.download_button(f"Rapport PDF {filtre}", data=creer_pdf_section(filtre.upper(),data[k],pk), file_name=f"{filtre}.pdf")
-        if not data[k]:
-            st.info(f"Aucune donnee {filtre} pour cette tranche.")
-        for i, entry in enumerate(reversed(data[k])):
-            st.markdown("---")
-            st.markdown(f"**{entry.get('Type', entry.get('Produit', '-'))}** — {entry.get('Date', '-')}")
-            c1, c2 = st.columns(2)
-            with c1:
-                if entry.get("Lieu"):      st.write(f"Lieu: {entry['Lieu']}")
-                if entry.get("Immeuble"):  st.write(f"Immeuble: {entry['Immeuble']}")
-                qte_val = entry.get("Qte", "")
-                if qte_val:                st.write(f"Quantite: {qte_val}")
-                if entry.get("Surface"):   st.write(f"Surface: {entry['Surface']} m2")
-                if entry.get("Nom"):       st.write(f"Intervenant: {entry['Nom']}")
-            with c2:
-                if entry.get("photo"):     st.image(entry["photo"], width=250)
-            if st.button("Supprimer", key=f"del_{k}_{i}"):
-                e = data[k][-(i+1)]
-                supprimer_ligne_sheet(tranche, k, e)
-                data[k].pop(-(i+1))
-                sauvegarder_donnees()
-                st.rerun()
+        if not data[k]: st.info(f"Aucune donnee {filtre} pour cette tranche.")
+        for i,entry in enumerate(reversed(data[k])):
+            titre = f"{entry.get('Type',entry.get('Produit','-'))} - {entry.get('Date','-')}"
+            with st.expander(titre):
+                c1,c2 = st.columns(2)
+                with c1:
+                    if entry.get("Lieu"):      st.write(f"Lieu: {entry['Lieu']}")
+                    if entry.get("Immeuble"):  st.write(f"Immeuble: {entry['Immeuble']}")
+                    qte_val = entry.get("Qte", entry.get("Qte",""))
+                    if qte_val: st.write(f"Quantite: {qte_val}")
+                    if entry.get("Surface"):   st.write(f"Surface: {entry['Surface']} m2")
+                    if entry.get("Nom"):       st.write(f"Intervenant: {entry['Nom']}")
+                with c2:
+                    if entry.get("photo"): st.image(entry["photo"], width=250)
+                if st.button("Supprimer", key=f"del_{k}_{i}"):
+                    e = data[k][-(i+1)]
+                    supprimer_ligne_sheet(tranche,k,e)
+                    data[k].pop(-(i+1)); sauvegarder_donnees(); st.rerun()
 
 # ===== CATALOGUE =====
 elif mode == "CATALOGUE":
